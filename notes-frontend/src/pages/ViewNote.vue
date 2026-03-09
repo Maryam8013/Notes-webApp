@@ -192,6 +192,7 @@
 import { ref, onMounted } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import axios from "axios";
+import { API_BASE_URL } from "../config/api";
 
 export default {
   name: "ViewNote",
@@ -204,9 +205,7 @@ export default {
 
     const fetchNote = async () => {
       try {
-        const res = await axios.get(
-          `http://127.0.0.1:8000/api/notes/${noteId}`,
-        );
+        const res = await axios.get(`${API_BASE_URL}/notes/${noteId}`);
         note.value = res.data;
       } catch (err) {
         console.error("Error fetching note:", err);

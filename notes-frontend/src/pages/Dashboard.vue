@@ -57,7 +57,7 @@
           <div
             class="flex items-center justify-between pt-4 border-t border-slate-100"
           >
-            <span class="text-xs text-slate-400 flex items-center space-x-1">
+            <!-- <span class="text-xs text-slate-400 flex items-center space-x-1">
               <svg
                 class="w-4 h-4"
                 fill="none"
@@ -72,7 +72,7 @@
                 />
               </svg>
               <span>{{ note.date }}</span>
-            </span>
+            </span> -->
 
             <!-- Action Buttons -->
             <div class="flex items-center space-x-2">

@@ -103,7 +103,7 @@
       <div
         class="mt-6 bg-gradient-to-r from-indigo-50 to-purple-50 rounded-2xl p-6"
       >
-        <div class="flex items-center space-x-2 text-sm text-indigo-700">
+        <!-- <div class="flex items-center space-x-2 text-sm text-indigo-700">
           <svg
             class="w-5 h-5"
             fill="none"
@@ -118,7 +118,7 @@
             />
           </svg>
           <span class="font-semibold">Created on {{ editedNote.date }}</span>
-        </div>
+        </div> -->
       </div>
     </div>
 

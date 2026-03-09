@@ -130,6 +130,7 @@
 import { ref, provide, onMounted, watch } from "vue";
 import axios from "axios";
 import { useRouter, useRoute } from "vue-router";
+import { API_BASE_URL } from "../config/api";
 
 export default {
   name: "App",
@@ -139,7 +140,7 @@ export default {
     const sidebarOpen = ref(false);
     const notes = ref([]);
     const loading = ref(false);
-    const API = "http://127.0.0.1:8000/api";
+    const API = API_BASE_URL;
 
     // Fetch all notes from backend
     const fetchNotes = async () => {
