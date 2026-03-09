@@ -76,6 +76,7 @@ export default {
       } catch (err) {
         alert("Invalid credentials");
         console.error(err);
+        console.log("test CI");
       }
     };
 
