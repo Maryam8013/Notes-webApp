@@ -12,16 +12,32 @@ use Tymon\JWTAuth\Exceptions\JWTException;
 
 class AuthController extends Controller
 {
-    public function signup(Request $request)
+    private function payload(Request $request): array
     {
         $payload = $request->all();
+        if (empty($payload)) {
+            $raw = $request->getContent();
+            if (!empty($raw)) {
+                $decoded = json_decode($raw, true);
+                if (is_array($decoded)) {
+                    $payload = $decoded;
+                }
+            }
+        }
+
+        return $payload;
+    }
+
+    public function signup(Request $request)
+    {
+        $payload = $this->payload($request);
         if (isset($payload['email'])) {
             $payload['email'] = strtolower(trim($payload['email']));
         }
 
         $validator = Validator::make($payload, [
             'name' => 'required|string|max:255',
-            'email' => 'required|string|email:rfc,dns|unique:users,email',
+            'email' => 'required|string|email|unique:users,email',
             'password' => 'required|string|min:6',
         ]);
 
@@ -36,7 +52,7 @@ class AuthController extends Controller
                 'password' => Hash::make($payload['password']),
             ]);
 
-            $token = JWTAuth::fromUser($user);
+            $token = auth('api')->login($user);
 
             return response()->json([
                 'user' => $user,
@@ -49,13 +65,13 @@ class AuthController extends Controller
 
     public function login(Request $request)
     {
-        $payload = $request->all();
+        $payload = $this->payload($request);
         if (isset($payload['email'])) {
             $payload['email'] = strtolower(trim($payload['email']));
         }
 
         $validator = Validator::make($payload, [
-            'email' => 'required|string|email:rfc,dns|exists:users,email',
+            'email' => 'required|string|email|exists:users,email',
             'password' => 'required|string|min:6',
         ]);
 
@@ -69,7 +85,7 @@ class AuthController extends Controller
         ];
 
         try {
-            if (!$token = JWTAuth::attempt($credentials)) {
+            if (!$token = auth('api')->attempt($credentials)) {
                 return response()->json(['error' => 'Invalid credentials'], 401);
             }
         } catch (JWTException $e) {
@@ -77,7 +93,7 @@ class AuthController extends Controller
         }
 
         return response()->json([
-            'user' => auth()->user(),
+            'user' => auth('api')->user(),
             'token' => $token
         ]);
     }
