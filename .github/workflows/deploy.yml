@@ -54,7 +54,7 @@ jobs:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
-          envs: GITHUB_TOKEN,GITHUB_REPOSITORY_OWNER,GITHUB_SHA
+          envs: GHCR_TOKEN,GITHUB_REPOSITORY_OWNER,GITHUB_SHA
           script: |
             set -e
             OWNER_LOWER=$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')
@@ -62,7 +62,7 @@ jobs:
             export BACKEND_IMAGE="ghcr.io/${OWNER_LOWER}/notes-backend:${TAG}"
             export FRONTEND_IMAGE="ghcr.io/${OWNER_LOWER}/notes-frontend:${TAG}"
 
-            docker login ghcr.io -u "${OWNER_LOWER}" -p "${GITHUB_TOKEN}"
+            docker login ghcr.io -u "${OWNER_LOWER}" -p "${GHCR_TOKEN}"
 
             cd ~
             if [ ! -f docker-compose.yml ]; then
