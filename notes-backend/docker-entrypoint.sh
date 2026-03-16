@@ -27,6 +27,7 @@ set_env DB_PORT "$DB_PORT"
 set_env DB_DATABASE "$DB_DATABASE"
 set_env DB_USERNAME "$DB_USERNAME"
 set_env DB_PASSWORD "$DB_PASSWORD"
+set_env JWT_SECRET "$JWT_SECRET"
 
 if grep -q "^APP_KEY=$" /var/www/.env; then
   php artisan key:generate --force
