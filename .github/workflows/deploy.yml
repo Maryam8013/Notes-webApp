@@ -62,8 +62,6 @@ jobs:
             export BACKEND_IMAGE="ghcr.io/${OWNER_LOWER}/notes-backend:${TAG}"
             export FRONTEND_IMAGE="ghcr.io/${OWNER_LOWER}/notes-frontend:${TAG}"
 
-            printf '%s' "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u "${OWNER_LOWER}" --password-stdin
-
             cd ~
             if [ ! -f docker-compose.yml ]; then
               echo "docker-compose.yml not found in home directory"
