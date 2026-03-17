@@ -1,3 +1,58 @@
+# services:
+#   mysql:
+#     image: mysql:8.0
+#     container_name: notes-mysql
+#     environment:
+#       MYSQL_DATABASE: notes_db
+#       MYSQL_ROOT_PASSWORD: root
+#     ports:
+#       - "3306:3306"
+#     volumes:
+#       - mysql_data:/var/lib/mysql
+#     healthcheck:
+#       test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-proot"]
+#       interval: 10s
+#       timeout: 5s
+#       retries: 10
+
+#   backend:
+#     build:
+#       context: ./notes-backend
+#       dockerfile: Dockerfile
+#     container_name: notes-backend
+#     environment:
+#       APP_ENV: local
+#       APP_DEBUG: "true"
+#       APP_URL: http://localhost:8000
+#       FRONTEND_URL: http://localhost:5173
+#       DB_CONNECTION: mysql
+#       DB_HOST: mysql
+#       DB_PORT: 3306
+#       DB_DATABASE: notes_db
+#       DB_USERNAME: root
+#       DB_PASSWORD: root
+#     depends_on:
+#       mysql:
+#         condition: service_healthy
+#     ports:
+#       - "8000:8000"
+
+#   frontend:
+#     build:
+#       context: ./notes-frontend
+#       dockerfile: Dockerfile
+#     container_name: notes-frontend
+#     environment:
+#       VITE_API_BASE_URL: http://localhost:8000/api
+#     depends_on:
+#       - backend
+#     ports:
+#       - "5173:5173"
+
+# volumes:
+#   mysql_data:
+version: "3.9"
+
 services:
   mysql:
     image: mysql:8.0
@@ -14,6 +69,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
+    restart: unless-stopped
 
   backend:
     build:
@@ -21,10 +77,10 @@ services:
       dockerfile: Dockerfile
     container_name: notes-backend
     environment:
-      APP_ENV: local
-      APP_DEBUG: "true"
-      APP_URL: http://localhost:8000
-      FRONTEND_URL: http://localhost:5173
+      APP_ENV: production
+      APP_DEBUG: "false"
+      APP_URL: http://backend:8000
+      FRONTEND_URL: http://frontend:5173
       DB_CONNECTION: mysql
       DB_HOST: mysql
       DB_PORT: 3306
@@ -36,6 +92,7 @@ services:
         condition: service_healthy
     ports:
       - "8000:8000"
+    restart: unless-stopped
 
   frontend:
     build:
@@ -43,11 +100,12 @@ services:
       dockerfile: Dockerfile
     container_name: notes-frontend
     environment:
-      VITE_API_BASE_URL: http://localhost:8000/api
+      VITE_API_BASE_URL: http://backend:8000/api
     depends_on:
       - backend
     ports:
       - "5173:5173"
+    restart: unless-stopped
 
 volumes:
   mysql_data:
