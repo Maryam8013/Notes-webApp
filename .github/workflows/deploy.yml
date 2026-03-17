@@ -82,4 +82,4 @@ jobs:
             sed -i "s#ghcr.io/.*/notes-frontend:sha-[a-f0-9]\\{40\\}#${FRONTEND_IMAGE}#g" docker-compose.yml
 
             docker-compose pull backend frontend
-            docker-compose up -d --no-build
+            docker-compose up -d
