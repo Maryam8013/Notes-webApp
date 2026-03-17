@@ -38,7 +38,7 @@
           type="submit"
           class="w-full bg-gradient-to-r from-indigo-500 to-purple-600 text-white py-3 rounded-xl shadow-lg hover:shadow-xl transition-all duration-200 font-semibold"
         >
-          Login
+          Login (Auto Deploy Test)
         </button>
       </form>
       <p class="mt-4 text-sm text-slate-500 text-center">
