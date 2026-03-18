@@ -22,6 +22,7 @@ services:
     image: ghcr.io/maryamirfan123/notes-backend:sha-0000000000000000000000000000000000000000 # ✅ replaced build with image
     container_name: notes-backend
     environment:
+      APP_KEY: base64:FTSz6E+wCtn7iM77EICTRiFLI4F0YGGP4xUlcCM4qmA=
       APP_ENV: production
       APP_DEBUG: "false"
       APP_URL: http://backend:8000
@@ -43,7 +44,8 @@ services:
     image: ghcr.io/maryamirfan123/notes-frontend:sha-0000000000000000000000000000000000000000 # ✅ replaced build with image
     container_name: notes-frontend
     environment:
-      VITE_API_BASE_URL: http://backend:8000/api
+      VITE_API_BASE_URL: http://13.60.105.215:8000/api # ✅ Correct
+      # VITE_API_BASE_URL: http://backend:8000/api
     depends_on:
       - backend
     ports:
