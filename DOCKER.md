@@ -24,3 +24,4 @@ docker compose down
 - Backend container runs migrations on startup.
 - MySQL data persists in Docker volume `mysql_data`.
 - Frontend reads API base URL from `VITE_API_BASE_URL`.
+- Deployment to EC2 is handled by Ansible playbook `ansible/deploy.yml` in CI/CD.

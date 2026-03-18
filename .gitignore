@@ -3,3 +3,12 @@
 terraform/terraform.tfstate
 terraform/terraform.tfstate.backup
 terraform/.terraform.lock.hcl
+
+# Ansible local/secrets
+ansible/inventory.local.ini
+ansible/.vault_pass.txt
+ansible/*.retry
+ec2_key.pem
+deploy-vars.json
+*.pem
+*.key

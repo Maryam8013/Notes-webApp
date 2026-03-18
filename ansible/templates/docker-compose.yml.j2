@@ -1,0 +1,55 @@
+version: "3.9"
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: notes-mysql
+    environment:
+      MYSQL_DATABASE: notes_db
+      MYSQL_ROOT_PASSWORD: root
+    ports:
+      - "3307:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-proot"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  backend:
+    image: {{ backend_image }}
+    container_name: notes-backend
+    environment:
+      APP_KEY: ${APP_KEY}
+      JWT_SECRET: ${JWT_SECRET}
+      APP_ENV: production
+      APP_DEBUG: "false"
+      APP_URL: ${APP_URL:-http://backend:8000}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:5173}
+      FRONTEND_URLS: ${FRONTEND_URLS:-http://localhost:5173,http://127.0.0.1:5173}
+      DB_CONNECTION: mysql
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_DATABASE: notes_db
+      DB_USERNAME: root
+      DB_PASSWORD: root
+    depends_on:
+      mysql:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+
+  frontend:
+    image: {{ frontend_image }}
+    container_name: notes-frontend
+    depends_on:
+      - backend
+    ports:
+      - "5173:5173"
+    restart: unless-stopped
+
+volumes:
+  mysql_data:

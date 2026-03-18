@@ -1,0 +1,51 @@
+---
+- name: Deploy Notes stack with Docker Compose
+  hosts: all
+  gather_facts: false
+
+  vars:
+    deploy_dir: "{{ deploy_dir | default('~/notes-app') }}"
+
+  tasks:
+    - name: Validate required deployment vars
+      ansible.builtin.assert:
+        that:
+          - backend_image is defined
+          - frontend_image is defined
+          - app_key is defined
+          - jwt_secret is defined
+          - app_url is defined
+          - frontend_url is defined
+        fail_msg: "Missing required deploy vars. Required: backend_image, frontend_image, app_key, jwt_secret, app_url, frontend_url"
+
+    - name: Ensure deployment directory exists
+      ansible.builtin.file:
+        path: "{{ deploy_dir }}"
+        state: directory
+        mode: "0755"
+
+    - name: Render docker-compose.yml
+      ansible.builtin.template:
+        src: templates/docker-compose.yml.j2
+        dest: "{{ deploy_dir }}/docker-compose.yml"
+        mode: "0644"
+
+    - name: Render runtime .env
+      ansible.builtin.template:
+        src: templates/runtime.env.j2
+        dest: "{{ deploy_dir }}/.env"
+        mode: "0600"
+
+    - name: Pull backend/frontend images
+      ansible.builtin.command: docker compose pull backend frontend
+      args:
+        chdir: "{{ deploy_dir }}"
+
+    - name: Restart stack
+      ansible.builtin.command: docker compose up -d --remove-orphans
+      args:
+        chdir: "{{ deploy_dir }}"
+
+    - name: Prune unused images
+      ansible.builtin.command: docker image prune -af
+      changed_when: true
