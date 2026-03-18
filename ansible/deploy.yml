@@ -54,6 +54,13 @@
       args:
         chdir: "{{ deploy_dir }}"
 
+    - name: Remove existing named containers to avoid name conflicts
+      ansible.builtin.shell: |
+        for c in notes-mysql notes-backend notes-frontend; do
+          docker rm -f "$c" >/dev/null 2>&1 || true
+        done
+      changed_when: true
+
     - name: Restart stack
       ansible.builtin.shell: "{{ compose_cmd.stdout }} up -d --remove-orphans"
       args:
