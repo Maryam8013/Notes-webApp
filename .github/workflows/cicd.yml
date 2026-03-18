@@ -95,6 +95,25 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Resolve production URLs
+        run: |
+          API_BASE_URL="${{ secrets.PROD_API_BASE_URL }}"
+          if [ -z "$API_BASE_URL" ]; then
+            API_BASE_URL="http://${{ secrets.EC2_HOST }}:8000/api"
+          fi
+
+          FRONTEND_URL="${{ secrets.PROD_FRONTEND_URL }}"
+          if [ -z "$FRONTEND_URL" ]; then
+            FRONTEND_URL="http://${{ secrets.EC2_HOST }}:5173"
+          fi
+
+          APP_URL="${API_BASE_URL%/}"
+          APP_URL="${APP_URL%/api}"
+
+          echo "API_BASE_URL=${API_BASE_URL}" >> $GITHUB_ENV
+          echo "FRONTEND_URL=${FRONTEND_URL}" >> $GITHUB_ENV
+          echo "APP_URL=${APP_URL}" >> $GITHUB_ENV
+
       - name: Build and push backend
         uses: docker/build-push-action@v6
         with:
@@ -110,6 +129,8 @@ jobs:
           file: ./notes-frontend/Dockerfile
           push: true
           tags: ${{ env.FRONTEND_IMAGE }}
+          build-args: |
+            VITE_API_BASE_URL=${{ env.API_BASE_URL }}
 
       - name: Copy docker-compose to EC2
         uses: appleboy/scp-action@v0.1.7
@@ -122,11 +143,16 @@ jobs:
 
       - name: Deploy on EC2
         uses: appleboy/ssh-action@v1.0.3
+        env:
+          APP_KEY: ${{ secrets.APP_KEY }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          APP_URL: ${{ env.APP_URL }}
+          FRONTEND_URL: ${{ env.FRONTEND_URL }}
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
-          envs: GITHUB_REPOSITORY_OWNER,GITHUB_SHA,APP_KEY,JWT_SECRET
+          envs: GITHUB_REPOSITORY_OWNER,GITHUB_SHA,APP_KEY,JWT_SECRET,APP_URL,FRONTEND_URL
           script: |
             set -e
             OWNER_LOWER=$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')
@@ -139,9 +165,12 @@ jobs:
             sed -i "s#ghcr.io/.*/notes-backend:sha-[a-f0-9]\{40\}#${BACKEND_IMAGE}#g" docker-compose.yml
             sed -i "s#ghcr.io/.*/notes-frontend:sha-[a-f0-9]\{40\}#${FRONTEND_IMAGE}#g" docker-compose.yml
 
-            # Write APP_KEY to .env file
+            # Write runtime env values consumed by docker-compose
             echo "APP_KEY=${APP_KEY}" > ~/.env
             echo "JWT_SECRET=${JWT_SECRET}" >> ~/.env
+            echo "APP_URL=${APP_URL}" >> ~/.env
+            echo "FRONTEND_URL=${FRONTEND_URL}" >> ~/.env
+            echo "FRONTEND_URLS=${FRONTEND_URL},http://localhost:5173,http://127.0.0.1:5173" >> ~/.env
 
             # Pull new images and restart
             docker-compose pull backend frontend

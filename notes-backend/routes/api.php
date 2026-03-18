@@ -7,7 +7,7 @@ use Illuminate\Support\Facades\Route;
 // Handle preflight
 Route::options('{any}', function () {
     return response()->json([], 200);
-})->where('any', '.*');
+})->where('any', '.*')->middleware(CorsMiddleware::class);
 
 // Public routes
 Route::middleware([CorsMiddleware::class])->group(function () {

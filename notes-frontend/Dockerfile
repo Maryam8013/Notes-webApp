@@ -19,6 +19,10 @@ RUN npm ci
 
 COPY . .
 
+# Inject API URL at image build time so the bundled frontend points to production API.
+ARG VITE_API_BASE_URL
+ENV VITE_API_BASE_URL=${VITE_API_BASE_URL}
+
 # Build for production
 RUN npm run build
 

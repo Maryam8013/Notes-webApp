@@ -21,6 +21,7 @@ set_env() {
 
 set_env APP_URL "$APP_URL"
 set_env FRONTEND_URL "$FRONTEND_URL"
+set_env FRONTEND_URLS "$FRONTEND_URLS"
 set_env DB_CONNECTION "$DB_CONNECTION"
 set_env DB_HOST "$DB_HOST"
 set_env DB_PORT "$DB_PORT"
