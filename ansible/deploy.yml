@@ -36,13 +36,26 @@
         dest: "{{ deploy_dir }}/.env"
         mode: "0600"
 
+    - name: Detect available Compose command
+      ansible.builtin.shell: |
+        if docker compose version >/dev/null 2>&1; then
+          echo "docker compose"
+        elif docker-compose version >/dev/null 2>&1; then
+          echo "docker-compose"
+        else
+          echo "NO_COMPOSE"
+          exit 1
+        fi
+      register: compose_cmd
+      changed_when: false
+
     - name: Pull backend/frontend images
-      ansible.builtin.command: docker compose pull backend frontend
+      ansible.builtin.shell: "{{ compose_cmd.stdout }} pull backend frontend"
       args:
         chdir: "{{ deploy_dir }}"
 
     - name: Restart stack
-      ansible.builtin.command: docker compose up -d --remove-orphans
+      ansible.builtin.shell: "{{ compose_cmd.stdout }} up -d --remove-orphans"
       args:
         chdir: "{{ deploy_dir }}"
 
