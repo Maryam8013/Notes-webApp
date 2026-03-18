@@ -22,7 +22,8 @@ services:
     image: ghcr.io/maryamirfan123/notes-backend:sha-0000000000000000000000000000000000000000 # ✅ replaced build with image
     container_name: notes-backend
     environment:
-      APP_KEY: base64:FTSz6E+wCtn7iM77EICTRiFLI4F0YGGP4xUlcCM4qmA=
+      APP_KEY: ${APP_KEY}
+      JWT_SECRET: ${JWT_SECRET}
       APP_ENV: production
       APP_DEBUG: "false"
       APP_URL: http://backend:8000
