@@ -45,7 +45,7 @@ services:
     image: ghcr.io/maryamirfan123/notes-frontend:sha-0000000000000000000000000000000000000000 # ✅ replaced build with image
     container_name: notes-frontend
     environment:
-      VITE_API_BASE_URL: http://13.60.105.215:8000/api # ✅ Correct
+      VITE_API_BASE_URL: http://13.61.22.253:8000/api # ✅ Correct
       # VITE_API_BASE_URL: http://backend:8000/api
     depends_on:
       - backend
