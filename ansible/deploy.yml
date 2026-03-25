@@ -57,11 +57,27 @@
       ansible.builtin.shell: |
         if docker compose version >/dev/null 2>&1 || docker-compose version >/dev/null 2>&1; then
           echo "present"
+        elif [ -x /usr/libexec/docker/cli-plugins/docker-compose ] || [ -x /usr/lib/docker/cli-plugins/docker-compose ]; then
+          echo "present"
         else
           echo "missing"
         fi
       register: compose_presence
       changed_when: false
+
+    - name: Ensure Docker engine is installed
+      become: true
+      ansible.builtin.apt:
+        update_cache: true
+        name: docker.io
+        state: present
+
+    - name: Ensure Docker service is running
+      become: true
+      ansible.builtin.service:
+        name: docker
+        state: started
+        enabled: true
 
     - name: Install Docker Compose plugin when missing
       become: true
@@ -90,6 +106,10 @@
           echo "docker compose"
         elif docker-compose version >/dev/null 2>&1; then
           echo "docker-compose"
+        elif [ -x /usr/libexec/docker/cli-plugins/docker-compose ]; then
+          echo "/usr/libexec/docker/cli-plugins/docker-compose"
+        elif [ -x /usr/lib/docker/cli-plugins/docker-compose ]; then
+          echo "/usr/lib/docker/cli-plugins/docker-compose"
         else
           echo "NO_COMPOSE"
           exit 1
