@@ -53,6 +53,37 @@
         dest: "{{ deploy_dir }}/.env"
         mode: "0600"
 
+    - name: Check if Docker Compose is already available
+      ansible.builtin.shell: |
+        if docker compose version >/dev/null 2>&1 || docker-compose version >/dev/null 2>&1; then
+          echo "present"
+        else
+          echo "missing"
+        fi
+      register: compose_presence
+      changed_when: false
+
+    - name: Install Docker Compose plugin when missing
+      become: true
+      ansible.builtin.apt:
+        update_cache: true
+        name: docker-compose-plugin
+        state: present
+      when: compose_presence.stdout == "missing"
+      register: compose_plugin_install
+      failed_when: false
+
+    - name: Install legacy docker-compose when plugin package is unavailable
+      become: true
+      ansible.builtin.apt:
+        update_cache: false
+        name: docker-compose
+        state: present
+      when:
+        - compose_presence.stdout == "missing"
+        - compose_plugin_install is defined
+        - compose_plugin_install.failed | default(false)
+
     - name: Detect available Compose command
       ansible.builtin.shell: |
         if docker compose version >/dev/null 2>&1; then
