@@ -12,3 +12,7 @@ ec2_key.pem
 deploy-vars.json
 *.pem
 *.key
+
+# Kubernetes local/secrets
+k8s/secret.yaml
+k8s/*.local.yaml

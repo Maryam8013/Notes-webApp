@@ -52,6 +52,7 @@ resource "aws_instance" "app_server" {
   ami           = "ami-0c1ac8a41498c1a9c" # Ubuntu for eu-north-1 (works)
   instance_type = var.instance_type
   key_name      = var.key_name
+  associate_public_ip_address = true
 
   vpc_security_group_ids = [aws_security_group.web_sg.id]
 
