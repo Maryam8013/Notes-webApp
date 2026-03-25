@@ -147,6 +147,26 @@ jobs:
           printf '%s\n' "${{ secrets.EC2_SSH_KEY }}" > ec2_key.pem
           chmod 600 ec2_key.pem
 
+      - name: Preflight SSH connectivity
+        run: |
+          set -euo pipefail
+          HOST="${{ secrets.EC2_HOST }}"
+          USER="${{ secrets.EC2_USER }}"
+          echo "Checking SSH reachability for ${USER}@${HOST}:22"
+
+          for i in {1..30}; do
+            if timeout 3 bash -c "cat < /dev/null > /dev/tcp/${HOST}/22" 2>/dev/null; then
+              echo "Port 22 is reachable on ${HOST}"
+              break
+            fi
+            if [ "$i" -eq 30 ]; then
+              echo "EC2 host is not reachable on port 22."
+              echo "If you recently recreated EC2 via Terraform, update GitHub secret EC2_HOST to the latest terraform output public_ip."
+              exit 1
+            fi
+            sleep 5
+          done
+
       - name: Deploy on EC2 with Ansible
         env:
           APP_KEY: ${{ secrets.APP_KEY }}

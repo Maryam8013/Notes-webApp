@@ -6,6 +6,23 @@
   vars:
     deploy_dir: "{{ deploy_dir | default('~/notes-app') }}"
 
+  pre_tasks:
+    - name: Wait for SSH port to be reachable
+      ansible.builtin.wait_for:
+        host: "{{ ansible_host | default(inventory_hostname) }}"
+        port: 22
+        state: started
+        delay: 5
+        sleep: 5
+        timeout: 420
+      delegate_to: localhost
+
+    - name: Wait for Ansible SSH connection
+      ansible.builtin.wait_for_connection:
+        delay: 5
+        sleep: 5
+        timeout: 420
+
   tasks:
     - name: Validate required deployment vars
       ansible.builtin.assert:
