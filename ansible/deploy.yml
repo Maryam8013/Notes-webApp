@@ -79,26 +79,25 @@
         state: started
         enabled: true
 
-    - name: Install Docker Compose plugin when missing
+    - name: Install Docker Compose from distro packages when missing
       become: true
-      ansible.builtin.apt:
-        update_cache: true
-        name: docker-compose-plugin
-        state: present
+      ansible.builtin.shell: |
+        set -e
+        export DEBIAN_FRONTEND=noninteractive
+        apt-get update -y
+        for pkg in docker-compose-plugin docker-compose-v2 docker-compose; do
+          if apt-get install -y "$pkg"; then
+            echo "installed:$pkg"
+            exit 0
+          fi
+        done
+        exit 1
+      args:
+        executable: /bin/bash
       when: compose_presence.stdout == "missing"
-      register: compose_plugin_install
+      register: compose_install_attempt
+      changed_when: "'installed:' in compose_install_attempt.stdout"
       failed_when: false
-
-    - name: Install legacy docker-compose when plugin package is unavailable
-      become: true
-      ansible.builtin.apt:
-        update_cache: false
-        name: docker-compose
-        state: present
-      when:
-        - compose_presence.stdout == "missing"
-        - compose_plugin_install is defined
-        - compose_plugin_install.failed | default(false)
 
     - name: Detect available Compose command
       ansible.builtin.shell: |
