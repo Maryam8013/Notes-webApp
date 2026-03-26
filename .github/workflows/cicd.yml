@@ -143,9 +143,28 @@ jobs:
     name: Deploy to Kubernetes
     runs-on: ubuntu-latest
     needs: [build-and-push]
-    if: github.event_name == 'push' && secrets.KUBE_CONFIG_DATA != ''
+    if: github.event_name == 'push'
     steps:
       - uses: actions/checkout@v4
+
+      - name: Validate required Kubernetes secrets
+        run: |
+          if [ -z "${{ secrets.KUBE_CONFIG_DATA }}" ]; then
+            echo "Missing required secret: KUBE_CONFIG_DATA"
+            exit 1
+          fi
+          if [ -z "${{ secrets.APP_KEY }}" ]; then
+            echo "Missing required secret: APP_KEY"
+            exit 1
+          fi
+          if [ -z "${{ secrets.JWT_SECRET }}" ]; then
+            echo "Missing required secret: JWT_SECRET"
+            exit 1
+          fi
+          if [ -z "${{ secrets.MYSQL_ROOT_PASSWORD }}" ]; then
+            echo "Missing required secret: MYSQL_ROOT_PASSWORD"
+            exit 1
+          fi
 
       - name: Set image tags
         run: |
