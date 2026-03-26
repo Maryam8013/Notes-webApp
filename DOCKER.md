@@ -12,8 +12,6 @@
 docker compose up --build
 ```
 
-## test
-
 ## Stop
 
 ```bash
