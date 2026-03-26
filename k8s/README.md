@@ -88,6 +88,20 @@ Optional secrets:
 - `K8S_FRONTEND_URL` (default: `http://YOUR_NODE_IP:30517`)
 - `K8S_API_BASE_URL` (used at frontend image build time)
 
+### Remote cluster requirement
+
+`KUBE_CONFIG_DATA` must point to a remote-reachable API server (not `127.0.0.1` or `localhost`).
+
+Generate GitHub-safe kubeconfig from your remote context:
+
+```bash
+kubectl config use-context <REMOTE_CONTEXT_NAME>
+kubectl config view --raw --flatten --minify > kubeconfig-github.yaml
+base64 -w 0 kubeconfig-github.yaml
+```
+
+Use the base64 output as `KUBE_CONFIG_DATA`.
+
 ## Important note about frontend API URL
 
 The frontend image bakes `VITE_API_BASE_URL` at build time. Build frontend with the API URL you plan to expose:

@@ -192,6 +192,25 @@ jobs:
           echo "${{ secrets.KUBE_CONFIG_DATA }}" | base64 -d > "${HOME}/.kube/config"
           chmod 600 "${HOME}/.kube/config"
 
+      - name: Validate kubeconfig for remote cluster
+        if: env.K8S_ENABLED == 'true'
+        run: |
+          set -euo pipefail
+          KUBE_SERVER="$(kubectl config view --minify -o jsonpath='{.clusters[0].cluster.server}')"
+          echo "Kubernetes API server: ${KUBE_SERVER}"
+
+          if echo "${KUBE_SERVER}" | grep -Eq '127\.0\.0\.1|localhost'; then
+            echo "KUBE_CONFIG_DATA points to a local cluster (${KUBE_SERVER})."
+            echo "Use a remote cluster kubeconfig for GitHub-hosted runners."
+            exit 1
+          fi
+
+          if grep -Eq 'client-certificate:|client-key:|certificate-authority:' "${HOME}/.kube/config"; then
+            echo "KUBE_CONFIG_DATA contains path-based cert references."
+            echo "Regenerate using: kubectl config view --raw --flatten --minify"
+            exit 1
+          fi
+
       - name: Resolve Kubernetes runtime URLs
         if: env.K8S_ENABLED == 'true'
         run: |
