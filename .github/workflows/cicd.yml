@@ -139,87 +139,6 @@ jobs:
           build-args: |
             VITE_API_BASE_URL=${{ env.API_BASE_URL }}
 
-  deploy-k8s:
-    name: Deploy to Kubernetes
-    runs-on: [self-hosted, windows]
-    needs: [build-and-push]
-    if: github.event_name == 'push'
-    defaults:
-      run:
-        shell: pwsh
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Validate required Kubernetes secrets
-        run: |
-          if ("${{ secrets.KUBE_CONFIG_DATA }}" -eq "") { Write-Error "Missing required secret: KUBE_CONFIG_DATA"; exit 1 }
-          if ("${{ secrets.APP_KEY }}" -eq "") { Write-Error "Missing required secret: APP_KEY"; exit 1 }
-          if ("${{ secrets.JWT_SECRET }}" -eq "") { Write-Error "Missing required secret: JWT_SECRET"; exit 1 }
-          if ("${{ secrets.MYSQL_ROOT_PASSWORD }}" -eq "") { Write-Error "Missing required secret: MYSQL_ROOT_PASSWORD"; exit 1 }
-
-      - name: Set image tags
-        run: |
-          $ownerLower = "${env:GITHUB_REPOSITORY_OWNER}".ToLower()
-          "BACKEND_IMAGE=ghcr.io/$ownerLower/notes-backend:sha-${env:GITHUB_SHA}" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          "FRONTEND_IMAGE=ghcr.io/$ownerLower/notes-frontend:sha-${env:GITHUB_SHA}" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-
-      - name: Set Kubernetes runtime URLs
-        run: |
-          $k8sAppUrl = "${{ secrets.K8S_APP_URL }}"
-          if ($k8sAppUrl -eq "") { $k8sAppUrl = "http://YOUR_NODE_IP:30800" }
-
-          $k8sFrontendUrl = "${{ secrets.K8S_FRONTEND_URL }}"
-          if ($k8sFrontendUrl -eq "") { $k8sFrontendUrl = "http://YOUR_NODE_IP:30517" }
-
-          "K8S_APP_URL=$k8sAppUrl" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          "K8S_FRONTEND_URL=$k8sFrontendUrl" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          "K8S_FRONTEND_URLS=$k8sFrontendUrl,http://localhost:5173,http://127.0.0.1:5173" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-
-      - name: Setup kubectl
-        uses: azure/setup-kubectl@v4
-
-      - name: Configure kubeconfig
-        run: |
-          New-Item -ItemType Directory -Path "$HOME\.kube" -Force | Out-Null
-          [IO.File]::WriteAllBytes("$HOME\.kube\config", [Convert]::FromBase64String("${{ secrets.KUBE_CONFIG_DATA }}"))
-
-      - name: Apply Kubernetes manifests
-        run: kubectl apply -k k8s
-
-      - name: Upsert Kubernetes secret
-        run: |
-          kubectl -n notes-app create secret generic notes-secrets `
-            --from-literal=APP_KEY='${{ secrets.APP_KEY }}' `
-            --from-literal=JWT_SECRET='${{ secrets.JWT_SECRET }}' `
-            --from-literal=MYSQL_ROOT_PASSWORD='${{ secrets.MYSQL_ROOT_PASSWORD }}' `
-            --dry-run=client -o yaml | kubectl apply -f -
-
-      - name: Upsert Kubernetes configmap
-        run: |
-          kubectl -n notes-app create configmap notes-config `
-            --from-literal=APP_ENV='production' `
-            --from-literal=APP_DEBUG='false' `
-            --from-literal=DB_CONNECTION='mysql' `
-            --from-literal=DB_HOST='mysql' `
-            --from-literal=DB_PORT='3306' `
-            --from-literal=DB_DATABASE='notes_db' `
-            --from-literal=DB_USERNAME='root' `
-            --from-literal=APP_URL="${env:K8S_APP_URL}" `
-            --from-literal=FRONTEND_URL="${env:K8S_FRONTEND_URL}" `
-            --from-literal=FRONTEND_URLS="${env:K8S_FRONTEND_URLS}" `
-            --dry-run=client -o yaml | kubectl apply -f -
-
-      - name: Set app images
-        run: |
-          kubectl -n notes-app set image deployment/notes-app `
-            backend="${env:BACKEND_IMAGE}" `
-            frontend="${env:FRONTEND_IMAGE}"
-
-      - name: Restart and wait for rollout
-        run: |
-          kubectl -n notes-app rollout restart deployment/notes-app
-          kubectl -n notes-app rollout status deployment/notes-app --timeout=240s
-
   deploy-ec2-ansible:
     name: Deploy to EC2 (Ansible)
     runs-on: ubuntu-latest
@@ -253,6 +172,73 @@ jobs:
           echo "API_BASE_URL=${API_BASE_URL}" >> $GITHUB_ENV
           echo "FRONTEND_URL=${FRONTEND_URL}" >> $GITHUB_ENV
           echo "APP_URL=${APP_URL}" >> $GITHUB_ENV
+
+      - name: Detect Kubernetes deploy config
+        run: |
+          if [ -n "${{ secrets.KUBE_CONFIG_DATA }}" ]; then
+            echo "K8S_ENABLED=true" >> $GITHUB_ENV
+          else
+            echo "K8S_ENABLED=false" >> $GITHUB_ENV
+          fi
+
+      - name: Setup kubectl
+        if: env.K8S_ENABLED == 'true'
+        uses: azure/setup-kubectl@v4
+
+      - name: Configure kubeconfig
+        if: env.K8S_ENABLED == 'true'
+        run: |
+          mkdir -p "${HOME}/.kube"
+          echo "${{ secrets.KUBE_CONFIG_DATA }}" | base64 -d > "${HOME}/.kube/config"
+          chmod 600 "${HOME}/.kube/config"
+
+      - name: Resolve Kubernetes runtime URLs
+        if: env.K8S_ENABLED == 'true'
+        run: |
+          K8S_APP_URL="${{ secrets.K8S_APP_URL }}"
+          if [ -z "$K8S_APP_URL" ]; then
+            K8S_APP_URL="${APP_URL}"
+          fi
+
+          K8S_FRONTEND_URL="${{ secrets.K8S_FRONTEND_URL }}"
+          if [ -z "$K8S_FRONTEND_URL" ]; then
+            K8S_FRONTEND_URL="${FRONTEND_URL}"
+          fi
+
+          echo "K8S_APP_URL=${K8S_APP_URL}" >> $GITHUB_ENV
+          echo "K8S_FRONTEND_URL=${K8S_FRONTEND_URL}" >> $GITHUB_ENV
+          echo "K8S_FRONTEND_URLS=${K8S_FRONTEND_URL},http://localhost:5173,http://127.0.0.1:5173" >> $GITHUB_ENV
+
+      - name: Deploy to Kubernetes
+        if: env.K8S_ENABLED == 'true'
+        run: |
+          kubectl apply -k k8s
+
+          kubectl -n notes-app create secret generic notes-secrets \
+            --from-literal=APP_KEY='${{ secrets.APP_KEY }}' \
+            --from-literal=JWT_SECRET='${{ secrets.JWT_SECRET }}' \
+            --from-literal=MYSQL_ROOT_PASSWORD='${{ secrets.MYSQL_ROOT_PASSWORD }}' \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+          kubectl -n notes-app create configmap notes-config \
+            --from-literal=APP_ENV='production' \
+            --from-literal=APP_DEBUG='false' \
+            --from-literal=DB_CONNECTION='mysql' \
+            --from-literal=DB_HOST='mysql' \
+            --from-literal=DB_PORT='3306' \
+            --from-literal=DB_DATABASE='notes_db' \
+            --from-literal=DB_USERNAME='root' \
+            --from-literal=APP_URL="${K8S_APP_URL}" \
+            --from-literal=FRONTEND_URL="${K8S_FRONTEND_URL}" \
+            --from-literal=FRONTEND_URLS="${K8S_FRONTEND_URLS}" \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+          kubectl -n notes-app set image deployment/notes-app \
+            backend="${BACKEND_IMAGE}" \
+            frontend="${FRONTEND_IMAGE}"
+
+          kubectl -n notes-app rollout restart deployment/notes-app
+          kubectl -n notes-app rollout status deployment/notes-app --timeout=240s
 
       - name: Setup Python for Ansible
         uses: actions/setup-python@v5
