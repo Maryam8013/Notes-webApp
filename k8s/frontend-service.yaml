@@ -5,7 +5,7 @@ metadata:
   namespace: notes-app
 spec:
   selector:
-    app: frontend
+    app: notes-app
   ports:
     - port: 5173
       targetPort: 5173

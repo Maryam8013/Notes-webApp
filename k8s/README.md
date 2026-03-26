@@ -1,23 +1,29 @@
-# Kubernetes Deployment (Phase 1)
+# Kubernetes Deployment
 
-This setup mirrors your Docker Compose stack on Kubernetes:
-- MySQL
-- Laravel backend
-- Vue frontend
+This folder contains a fresh Kubernetes setup for the Notes app.
 
-It is designed for a single-node cluster first (k3s, minikube, or kubeadm) using `NodePort` services.
+## Architecture
+
+- `mysql` runs in its own Pod.
+- `notes-app` Deployment runs both containers in a single Pod:
+  - `backend` on port `8000`
+  - `frontend` on port `5173`
+- Services:
+  - `frontend` NodePort: `30517`
+  - `backend` NodePort: `30800`
+  - `mysql` ClusterIP: `3306`
 
 ## 1) Prerequisites
 
-- A working Kubernetes cluster
-- `kubectl` configured to that cluster
+- A Kubernetes cluster
+- `kubectl` configured
 - Images pushed to GHCR:
-  - backend: `ghcr.io/<owner>/notes-backend:<tag>`
-  - frontend: `ghcr.io/<owner>/notes-frontend:<tag>`
+  - `ghcr.io/<owner>/notes-backend:<tag>`
+  - `ghcr.io/<owner>/notes-frontend:<tag>`
 
-## 2) Create secrets
+## 2) Create secret
 
-Option A (recommended): create directly with kubectl
+Option A (recommended):
 
 ```bash
 kubectl create namespace notes-app --dry-run=client -o yaml | kubectl apply -f -
@@ -28,34 +34,17 @@ kubectl -n notes-app create secret generic notes-secrets \
   --dry-run=client -o yaml | kubectl apply -f -
 ```
 
-Option B: copy `secret.example.yaml` to `secret.yaml`, fill values, then apply.
+Option B: copy `secret.example.yaml` to `secret.yaml`, update values, then apply.
 
 ## 3) Update runtime config
 
-Edit `k8s/configmap.yaml` and set:
+Edit `k8s/configmap.yaml`:
+
 - `APP_URL`
 - `FRONTEND_URL`
 - `FRONTEND_URLS`
 
-For single-node testing with NodePort, use your node public IP:
-- Backend: `http://<NODE_IP>:30800`
-- Frontend: `http://<NODE_IP>:30517`
-
 ## 4) Apply manifests
-
-```bash
-kubectl apply -f k8s/namespace.yaml
-kubectl apply -f k8s/configmap.yaml
-kubectl apply -f k8s/mysql-pvc.yaml
-kubectl apply -f k8s/mysql-deployment.yaml
-kubectl apply -f k8s/mysql-service.yaml
-kubectl apply -f k8s/backend-deployment.yaml
-kubectl apply -f k8s/backend-service.yaml
-kubectl apply -f k8s/frontend-deployment.yaml
-kubectl apply -f k8s/frontend-service.yaml
-```
-
-Or with kustomize:
 
 ```bash
 kubectl apply -k k8s
@@ -64,26 +53,44 @@ kubectl apply -k k8s
 ## 5) Set image tags
 
 ```bash
-kubectl -n notes-app set image deployment/backend backend=ghcr.io/<owner>/notes-backend:<tag>
-kubectl -n notes-app set image deployment/frontend frontend=ghcr.io/<owner>/notes-frontend:<tag>
+kubectl -n notes-app set image deployment/notes-app \
+  backend=ghcr.io/<owner>/notes-backend:<tag> \
+  frontend=ghcr.io/<owner>/notes-frontend:<tag>
 ```
 
 ## 6) Verify
 
 ```bash
 kubectl -n notes-app get pods,svc
-kubectl -n notes-app logs deployment/backend --tail=100
+kubectl -n notes-app logs deployment/notes-app -c backend --tail=100
+kubectl -n notes-app logs deployment/notes-app -c frontend --tail=100
 ```
 
 Open:
+
 - Frontend: `http://<NODE_IP>:30517`
 - API: `http://<NODE_IP>:30800/api`
 
+## GitHub Actions automation
+
+Workflow `.github/workflows/cicd.yml` now includes a `Deploy to Kubernetes` job.
+
+Required repository secrets:
+
+- `KUBE_CONFIG_DATA` (base64-encoded kubeconfig)
+- `APP_KEY`
+- `JWT_SECRET`
+- `MYSQL_ROOT_PASSWORD`
+
+Optional secrets:
+
+- `K8S_APP_URL` (default: `http://YOUR_NODE_IP:30800`)
+- `K8S_FRONTEND_URL` (default: `http://YOUR_NODE_IP:30517`)
+- `K8S_API_BASE_URL` (used at frontend image build time)
+
 ## Important note about frontend API URL
 
-Your frontend image bakes `VITE_API_BASE_URL` at build time. Build frontend with the same API URL you plan to expose from Kubernetes.
-
-Example:
+The frontend image bakes `VITE_API_BASE_URL` at build time. Build frontend with the API URL you plan to expose:
 
 ```bash
 docker build -t ghcr.io/<owner>/notes-frontend:<tag> \

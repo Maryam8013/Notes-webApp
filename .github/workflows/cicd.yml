@@ -72,8 +72,8 @@ jobs:
       - run: php artisan migrate --force
       - run: php artisan test
 
-  build-and-deploy:
-    name: Build, Push & Deploy
+  build-and-push:
+    name: Build & Push Images
     runs-on: ubuntu-latest
     needs: [frontend-ci, backend-ci]
     if: github.event_name == 'push'
@@ -99,10 +99,16 @@ jobs:
         run: |
           API_BASE_URL="${{ secrets.PROD_API_BASE_URL }}"
           if [ -z "$API_BASE_URL" ]; then
+            API_BASE_URL="${{ secrets.K8S_API_BASE_URL }}"
+          fi
+          if [ -z "$API_BASE_URL" ]; then
             API_BASE_URL="http://${{ secrets.EC2_HOST }}:8000/api"
           fi
 
           FRONTEND_URL="${{ secrets.PROD_FRONTEND_URL }}"
+          if [ -z "$FRONTEND_URL" ]; then
+            FRONTEND_URL="${{ secrets.K8S_FRONTEND_URL }}"
+          fi
           if [ -z "$FRONTEND_URL" ]; then
             FRONTEND_URL="http://${{ secrets.EC2_HOST }}:5173"
           fi
@@ -131,6 +137,116 @@ jobs:
           tags: ${{ env.FRONTEND_IMAGE }}
           build-args: |
             VITE_API_BASE_URL=${{ env.API_BASE_URL }}
+
+  deploy-k8s:
+    name: Deploy to Kubernetes
+    runs-on: ubuntu-latest
+    needs: [build-and-push]
+    if: github.event_name == 'push' && secrets.KUBE_CONFIG_DATA != ''
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set image tags
+        run: |
+          OWNER_LOWER=$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')
+          echo "BACKEND_IMAGE=ghcr.io/${OWNER_LOWER}/notes-backend:sha-${GITHUB_SHA}" >> $GITHUB_ENV
+          echo "FRONTEND_IMAGE=ghcr.io/${OWNER_LOWER}/notes-frontend:sha-${GITHUB_SHA}" >> $GITHUB_ENV
+
+      - name: Set Kubernetes runtime URLs
+        run: |
+          K8S_APP_URL="${{ secrets.K8S_APP_URL }}"
+          if [ -z "$K8S_APP_URL" ]; then
+            K8S_APP_URL="http://YOUR_NODE_IP:30800"
+          fi
+
+          K8S_FRONTEND_URL="${{ secrets.K8S_FRONTEND_URL }}"
+          if [ -z "$K8S_FRONTEND_URL" ]; then
+            K8S_FRONTEND_URL="http://YOUR_NODE_IP:30517"
+          fi
+
+          echo "K8S_APP_URL=${K8S_APP_URL}" >> $GITHUB_ENV
+          echo "K8S_FRONTEND_URL=${K8S_FRONTEND_URL}" >> $GITHUB_ENV
+          echo "K8S_FRONTEND_URLS=${K8S_FRONTEND_URL},http://localhost:5173,http://127.0.0.1:5173" >> $GITHUB_ENV
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Configure kubeconfig
+        run: |
+          mkdir -p "${HOME}/.kube"
+          echo "${{ secrets.KUBE_CONFIG_DATA }}" | base64 -d > "${HOME}/.kube/config"
+          chmod 600 "${HOME}/.kube/config"
+
+      - name: Apply Kubernetes manifests
+        run: kubectl apply -k k8s
+
+      - name: Upsert Kubernetes secret
+        run: |
+          kubectl -n notes-app create secret generic notes-secrets \
+            --from-literal=APP_KEY='${{ secrets.APP_KEY }}' \
+            --from-literal=JWT_SECRET='${{ secrets.JWT_SECRET }}' \
+            --from-literal=MYSQL_ROOT_PASSWORD='${{ secrets.MYSQL_ROOT_PASSWORD }}' \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Upsert Kubernetes configmap
+        run: |
+          kubectl -n notes-app create configmap notes-config \
+            --from-literal=APP_ENV='production' \
+            --from-literal=APP_DEBUG='false' \
+            --from-literal=DB_CONNECTION='mysql' \
+            --from-literal=DB_HOST='mysql' \
+            --from-literal=DB_PORT='3306' \
+            --from-literal=DB_DATABASE='notes_db' \
+            --from-literal=DB_USERNAME='root' \
+            --from-literal=APP_URL="${K8S_APP_URL}" \
+            --from-literal=FRONTEND_URL="${K8S_FRONTEND_URL}" \
+            --from-literal=FRONTEND_URLS="${K8S_FRONTEND_URLS}" \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Set app images
+        run: |
+          kubectl -n notes-app set image deployment/notes-app \
+            backend="${BACKEND_IMAGE}" \
+            frontend="${FRONTEND_IMAGE}"
+
+      - name: Restart and wait for rollout
+        run: |
+          kubectl -n notes-app rollout restart deployment/notes-app
+          kubectl -n notes-app rollout status deployment/notes-app --timeout=240s
+
+  deploy-ec2-ansible:
+    name: Deploy to EC2 (Ansible)
+    runs-on: ubuntu-latest
+    needs: [build-and-push]
+    if: github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set image tags
+        run: |
+          OWNER_LOWER=$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')
+          echo "OWNER_LOWER=${OWNER_LOWER}" >> $GITHUB_ENV
+          echo "BACKEND_IMAGE=ghcr.io/${OWNER_LOWER}/notes-backend:sha-${GITHUB_SHA}" >> $GITHUB_ENV
+          echo "FRONTEND_IMAGE=ghcr.io/${OWNER_LOWER}/notes-frontend:sha-${GITHUB_SHA}" >> $GITHUB_ENV
+
+      - name: Resolve production URLs
+        run: |
+          API_BASE_URL="${{ secrets.PROD_API_BASE_URL }}"
+          if [ -z "$API_BASE_URL" ]; then
+            API_BASE_URL="http://${{ secrets.EC2_HOST }}:8000/api"
+          fi
+
+          FRONTEND_URL="${{ secrets.PROD_FRONTEND_URL }}"
+          if [ -z "$FRONTEND_URL" ]; then
+            FRONTEND_URL="http://${{ secrets.EC2_HOST }}:5173"
+          fi
+
+          APP_URL="${API_BASE_URL%/}"
+          APP_URL="${APP_URL%/api}"
+
+          echo "API_BASE_URL=${API_BASE_URL}" >> $GITHUB_ENV
+          echo "FRONTEND_URL=${FRONTEND_URL}" >> $GITHUB_ENV
+          echo "APP_URL=${APP_URL}" >> $GITHUB_ENV
 
       - name: Setup Python for Ansible
         uses: actions/setup-python@v5

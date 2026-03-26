@@ -7,7 +7,6 @@ resources:
   - mysql-pvc.yaml
   - mysql-deployment.yaml
   - mysql-service.yaml
-  - backend-deployment.yaml
+  - notes-app-deployment.yaml
   - backend-service.yaml
-  - frontend-deployment.yaml
   - frontend-service.yaml
