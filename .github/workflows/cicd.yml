@@ -220,8 +220,22 @@ jobs:
               -o StrictHostKeyChecking=no \
               -o UserKnownHostsFile=/dev/null \
               "${EC2_USER}@${EC2_HOST}" \
-              "kubectl config view --raw --flatten --minify" > "${HOME}/.kube/config"
+              "bash -lc '
+                set -euo pipefail
+                if command -v kubectl >/dev/null 2>&1; then
+                  kubectl config view --raw --flatten --minify
+                elif command -v microk8s >/dev/null 2>&1; then
+                  sudo microk8s kubectl config view --raw --flatten --minify
+                elif [ -f ~/.kube/config ]; then
+                  cat ~/.kube/config
+                else
+                  echo \"No kubectl/microk8s found and ~/.kube/config is missing on EC2.\" >&2
+                  exit 1
+                fi
+              '" > "${HOME}/.kube/config"
             chmod 600 "${HOME}/.kube/config"
+            kubectl config view --raw --flatten --minify --kubeconfig "${HOME}/.kube/config" > "${HOME}/.kube/config.flattened"
+            mv "${HOME}/.kube/config.flattened" "${HOME}/.kube/config"
 
             REMOTE_KUBE_SERVER="$(kubectl config view --minify -o jsonpath='{.clusters[0].cluster.server}')"
             KUBE_HOST="$(echo "${REMOTE_KUBE_SERVER}" | sed -E 's#https?://([^:/]+).*#\1#')"
