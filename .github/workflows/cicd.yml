@@ -229,8 +229,23 @@ jobs:
                 elif [ -f ~/.kube/config ]; then
                   cat ~/.kube/config
                 else
-                  echo \"No kubectl/microk8s found and ~/.kube/config is missing on EC2.\" >&2
-                  exit 1
+                  echo \"No Kubernetes runtime detected on EC2. Bootstrapping k3s...\" >&2
+                  curl -sfL https://get.k3s.io | sh -
+                  sudo mkdir -p ~/.kube
+                  sudo cp /etc/rancher/k3s/k3s.yaml ~/.kube/config
+                  sudo chown $(id -u):$(id -g) ~/.kube/config
+                  # Wait until API responds before returning kubeconfig
+                  for i in {1..30}; do
+                    if sudo k3s kubectl get nodes >/dev/null 2>&1; then
+                      break
+                    fi
+                    if [ \"$i\" -eq 30 ]; then
+                      echo \"k3s API did not become ready in time.\" >&2
+                      exit 1
+                    fi
+                    sleep 5
+                  done
+                  sudo k3s kubectl config view --raw --flatten --minify
                 fi
               '" > "${HOME}/.kube/config"
             chmod 600 "${HOME}/.kube/config"
