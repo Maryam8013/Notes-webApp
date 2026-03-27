@@ -210,24 +210,42 @@ jobs:
               exit 1
             fi
 
-            KUBE_PORT="$(echo "${KUBE_SERVER}" | sed -E 's#https?://[^:]+:([0-9]+).*#\1#')"
-            if ! echo "${KUBE_PORT}" | grep -Eq '^[0-9]+$'; then
-              echo "Unable to parse Kubernetes API port from ${KUBE_SERVER}"
-              exit 1
-            fi
-
             TUNNEL_KEY="${RUNNER_TEMP}/k8s_tunnel_key.pem"
             printf '%s\n' "${EC2_SSH_KEY}" > "${TUNNEL_KEY}"
             chmod 600 "${TUNNEL_KEY}"
 
+            # Refresh CI kubeconfig from EC2 so runner uses the cluster config that
+            # is actually valid on the target machine.
+            ssh -i "${TUNNEL_KEY}" \
+              -o StrictHostKeyChecking=no \
+              -o UserKnownHostsFile=/dev/null \
+              "${EC2_USER}@${EC2_HOST}" \
+              "kubectl config view --raw --flatten --minify" > "${HOME}/.kube/config"
+            chmod 600 "${HOME}/.kube/config"
+
+            REMOTE_KUBE_SERVER="$(kubectl config view --minify -o jsonpath='{.clusters[0].cluster.server}')"
+            KUBE_HOST="$(echo "${REMOTE_KUBE_SERVER}" | sed -E 's#https?://([^:/]+).*#\1#')"
+            KUBE_PORT="$(echo "${REMOTE_KUBE_SERVER}" | sed -nE 's#https?://[^:]+:([0-9]+).*#\1#p')"
+            if [ -z "${KUBE_PORT}" ]; then
+              KUBE_PORT=443
+            fi
+            if ! echo "${KUBE_PORT}" | grep -Eq '^[0-9]+$'; then
+              echo "Unable to parse Kubernetes API port from ${REMOTE_KUBE_SERVER}"
+              exit 1
+            fi
+
+            LOCAL_TUNNEL_PORT=51690
             ssh -f -N \
-              -L "${KUBE_PORT}:127.0.0.1:${KUBE_PORT}" \
+              -L "${LOCAL_TUNNEL_PORT}:${KUBE_HOST}:${KUBE_PORT}" \
               -i "${TUNNEL_KEY}" \
               -o ExitOnForwardFailure=yes \
               -o ServerAliveInterval=30 \
               -o StrictHostKeyChecking=no \
               -o UserKnownHostsFile=/dev/null \
               "${EC2_USER}@${EC2_HOST}"
+
+            CLUSTER_NAME="$(kubectl config view --minify -o jsonpath='{.clusters[0].name}')"
+            kubectl config set-cluster "${CLUSTER_NAME}" --server="https://127.0.0.1:${LOCAL_TUNNEL_PORT}"
 
             echo "K8S_TUNNELED=true" >> $GITHUB_ENV
             echo "K8S_TUNNEL_KEY=${TUNNEL_KEY}" >> $GITHUB_ENV
@@ -257,7 +275,16 @@ jobs:
             exit 1
           fi
 
-          kubectl version --request-timeout=20s
+          for i in {1..5}; do
+            if kubectl version --request-timeout=20s; then
+              break
+            fi
+            if [ "$i" -eq 5 ]; then
+              echo "Unable to reach Kubernetes API after retries."
+              exit 1
+            fi
+            sleep 5
+          done
 
       - name: Resolve Kubernetes runtime URLs
         if: env.K8S_ENABLED == 'true'
