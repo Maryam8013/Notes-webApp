@@ -192,6 +192,49 @@ jobs:
           echo "${{ secrets.KUBE_CONFIG_DATA }}" | base64 -d > "${HOME}/.kube/config"
           chmod 600 "${HOME}/.kube/config"
 
+      - name: Open SSH tunnel for local kube API server
+        if: env.K8S_ENABLED == 'true'
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USER: ${{ secrets.EC2_USER }}
+          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          KUBE_SERVER="$(kubectl config view --minify -o jsonpath='{.clusters[0].cluster.server}')"
+          echo "Kubernetes API server: ${KUBE_SERVER}"
+
+          if echo "${KUBE_SERVER}" | grep -Eq '127\.0\.0\.1|localhost'; then
+            if [ -z "${EC2_HOST}" ] || [ -z "${EC2_USER}" ] || [ -z "${EC2_SSH_KEY}" ]; then
+              echo "Kubeconfig points to local API server, but EC2 tunnel credentials are missing."
+              echo "Set EC2_HOST, EC2_USER, and EC2_SSH_KEY secrets."
+              exit 1
+            fi
+
+            KUBE_PORT="$(echo "${KUBE_SERVER}" | sed -E 's#https?://[^:]+:([0-9]+).*#\1#')"
+            if ! echo "${KUBE_PORT}" | grep -Eq '^[0-9]+$'; then
+              echo "Unable to parse Kubernetes API port from ${KUBE_SERVER}"
+              exit 1
+            fi
+
+            TUNNEL_KEY="${RUNNER_TEMP}/k8s_tunnel_key.pem"
+            printf '%s\n' "${EC2_SSH_KEY}" > "${TUNNEL_KEY}"
+            chmod 600 "${TUNNEL_KEY}"
+
+            ssh -f -N \
+              -L "${KUBE_PORT}:127.0.0.1:${KUBE_PORT}" \
+              -i "${TUNNEL_KEY}" \
+              -o ExitOnForwardFailure=yes \
+              -o ServerAliveInterval=30 \
+              -o StrictHostKeyChecking=no \
+              -o UserKnownHostsFile=/dev/null \
+              "${EC2_USER}@${EC2_HOST}"
+
+            echo "K8S_TUNNELED=true" >> $GITHUB_ENV
+            echo "K8S_TUNNEL_KEY=${TUNNEL_KEY}" >> $GITHUB_ENV
+          else
+            echo "K8S_TUNNELED=false" >> $GITHUB_ENV
+          fi
+
       - name: Validate kubeconfig for remote cluster
         if: env.K8S_ENABLED == 'true'
         run: |
@@ -200,17 +243,21 @@ jobs:
           echo "Kubernetes API server: ${KUBE_SERVER}"
 
           if echo "${KUBE_SERVER}" | grep -Eq '127\.0\.0\.1|localhost'; then
-            echo "::warning::KUBE_CONFIG_DATA points to a local cluster (${KUBE_SERVER}). Skipping Kubernetes deploy on GitHub-hosted runner."
-            echo "K8S_ENABLED=false" >> $GITHUB_ENV
-            exit 0
+            if [ "${K8S_TUNNELED:-false}" != "true" ]; then
+              echo "KUBE_CONFIG_DATA points to a local cluster (${KUBE_SERVER}) and no SSH tunnel is active."
+              echo "Use a remote cluster kubeconfig or configure EC2 tunnel secrets."
+              exit 1
+            fi
+            echo "Using SSH tunnel for local kube API server endpoint ${KUBE_SERVER}."
           fi
 
           if grep -Eq 'client-certificate:|client-key:|certificate-authority:' "${HOME}/.kube/config"; then
-            echo "::warning::KUBE_CONFIG_DATA contains path-based cert references. Skipping Kubernetes deploy."
-            echo "::warning::Regenerate using: kubectl config view --raw --flatten --minify"
-            echo "K8S_ENABLED=false" >> $GITHUB_ENV
-            exit 0
+            echo "KUBE_CONFIG_DATA contains path-based cert references."
+            echo "Regenerate using: kubectl config view --raw --flatten --minify"
+            exit 1
           fi
+
+          kubectl version --request-timeout=20s
 
       - name: Resolve Kubernetes runtime URLs
         if: env.K8S_ENABLED == 'true'
@@ -259,6 +306,10 @@ jobs:
 
           kubectl -n notes-app rollout restart deployment/notes-app
           kubectl -n notes-app rollout status deployment/notes-app --timeout=240s
+
+      - name: Cleanup kube tunnel key
+        if: always() && env.K8S_TUNNEL_KEY != ''
+        run: rm -f "${K8S_TUNNEL_KEY}"
 
       - name: Setup Python for Ansible
         uses: actions/setup-python@v5
