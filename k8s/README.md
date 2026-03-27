@@ -84,8 +84,8 @@ Required repository secrets:
 
 Optional secrets:
 
-- `K8S_APP_URL` (default: `http://YOUR_NODE_IP:30800`)
-- `K8S_FRONTEND_URL` (default: `http://YOUR_NODE_IP:30517`)
+- `K8S_APP_URL` (default: `http://51.21.254.43:30800`)
+- `K8S_FRONTEND_URL` (default: `http://51.21.254.43:30517`)
 - `K8S_API_BASE_URL` (used at frontend image build time)
 
 ### Remote cluster requirement
