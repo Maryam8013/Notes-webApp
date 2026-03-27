@@ -213,14 +213,30 @@ jobs:
             TUNNEL_KEY="${RUNNER_TEMP}/k8s_tunnel_key.pem"
             printf '%s\n' "${EC2_SSH_KEY}" > "${TUNNEL_KEY}"
             chmod 600 "${TUNNEL_KEY}"
+            SSH_BASE_OPTS="-i ${TUNNEL_KEY} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -o ConnectionAttempts=1 -o ServerAliveInterval=30 -o ServerAliveCountMax=3"
+
+            # Retry SSH handshake because some hosts intermittently reset port 22.
+            SSH_READY=false
+            for attempt in $(seq 1 8); do
+              if ssh ${SSH_BASE_OPTS} "${EC2_USER}@${EC2_HOST}" "echo ssh-ok" >/dev/null 2>&1; then
+                SSH_READY=true
+                break
+              fi
+              echo "SSH not ready (attempt ${attempt}/8), retrying in 5s..."
+              sleep 5
+            done
+            if [ "${SSH_READY}" != "true" ]; then
+              echo "Unable to establish SSH connection to ${EC2_USER}@${EC2_HOST}:22 after retries."
+              echo "Verify EC2 is running, security group allows SSH from GitHub runners, and host key is correct."
+              exit 1
+            fi
 
             # Refresh CI kubeconfig from EC2 so runner uses the cluster config that
             # is actually valid on the target machine.
-            ssh -i "${TUNNEL_KEY}" \
-              -o StrictHostKeyChecking=no \
-              -o UserKnownHostsFile=/dev/null \
-              "${EC2_USER}@${EC2_HOST}" \
-              "set -euo pipefail; \
+            SSH_FETCH_OK=false
+            for attempt in $(seq 1 5); do
+              if ssh ${SSH_BASE_OPTS} "${EC2_USER}@${EC2_HOST}" \
+                "set -euo pipefail; \
                if command -v kubectl >/dev/null 2>&1; then \
                  kubectl config view --raw --flatten --minify; \
                elif command -v microk8s >/dev/null 2>&1; then \
@@ -239,7 +255,17 @@ jobs:
                    sleep 5; \
                  done; \
                  sudo k3s kubectl config view --raw --flatten --minify; \
-               fi" > "${HOME}/.kube/config"
+               fi" > "${HOME}/.kube/config"; then
+                SSH_FETCH_OK=true
+                break
+              fi
+              echo "Failed to fetch kubeconfig over SSH (attempt ${attempt}/5), retrying in 5s..."
+              sleep 5
+            done
+            if [ "${SSH_FETCH_OK}" != "true" ]; then
+              echo "Failed to fetch kubeconfig from EC2 after retries."
+              exit 1
+            fi
             chmod 600 "${HOME}/.kube/config"
             kubectl config view --raw --flatten --minify --kubeconfig "${HOME}/.kube/config" > "${HOME}/.kube/config.flattened"
             mv "${HOME}/.kube/config.flattened" "${HOME}/.kube/config"
@@ -256,14 +282,23 @@ jobs:
             fi
 
             LOCAL_TUNNEL_PORT=51690
-            ssh -f -N \
-              -L "${LOCAL_TUNNEL_PORT}:${KUBE_HOST}:${KUBE_PORT}" \
-              -i "${TUNNEL_KEY}" \
-              -o ExitOnForwardFailure=yes \
-              -o ServerAliveInterval=30 \
-              -o StrictHostKeyChecking=no \
-              -o UserKnownHostsFile=/dev/null \
-              "${EC2_USER}@${EC2_HOST}"
+            SSH_TUNNEL_OK=false
+            for attempt in $(seq 1 5); do
+              if ssh -f -N \
+                -L "${LOCAL_TUNNEL_PORT}:${KUBE_HOST}:${KUBE_PORT}" \
+                ${SSH_BASE_OPTS} \
+                -o ExitOnForwardFailure=yes \
+                "${EC2_USER}@${EC2_HOST}"; then
+                SSH_TUNNEL_OK=true
+                break
+              fi
+              echo "Failed to establish SSH tunnel (attempt ${attempt}/5), retrying in 5s..."
+              sleep 5
+            done
+            if [ "${SSH_TUNNEL_OK}" != "true" ]; then
+              echo "Unable to establish SSH tunnel to Kubernetes API after retries."
+              exit 1
+            fi
 
             CLUSTER_NAME="$(kubectl config view --minify -o jsonpath='{.clusters[0].name}')"
             kubectl config set-cluster "${CLUSTER_NAME}" --server="https://127.0.0.1:${LOCAL_TUNNEL_PORT}"
