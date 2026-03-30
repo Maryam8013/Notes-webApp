@@ -533,11 +533,28 @@ jobs:
               json.dump(payload, f)
           PY
 
-          ansible-playbook \
-            -i "${{ secrets.EC2_HOST }}," \
-            -u "${{ secrets.EC2_USER }}" \
-            --private-key ec2_key.pem \
-            ansible/deploy.yml \
-            -e @deploy-vars.json
+          DEPLOY_OK=false
+          for attempt in 1 2 3; do
+            echo "Running ansible deploy attempt ${attempt}/3..."
+            if ansible-playbook \
+              -i "${{ secrets.EC2_HOST }}," \
+              -u "${{ secrets.EC2_USER }}" \
+              --private-key ec2_key.pem \
+              ansible/deploy.yml \
+              -e @deploy-vars.json; then
+              DEPLOY_OK=true
+              break
+            fi
+
+            if [ "${attempt}" -lt 3 ]; then
+              echo "Ansible deploy failed (attempt ${attempt}/3). Retrying in 15s..."
+              sleep 15
+            fi
+          done
+
+          if [ "${DEPLOY_OK}" != "true" ]; then
+            echo "Ansible deployment failed after retries."
+            exit 1
+          fi
 
           rm -f ec2_key.pem deploy-vars.json
