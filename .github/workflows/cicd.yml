@@ -175,10 +175,12 @@ jobs:
 
       - name: Detect Kubernetes deploy config
         run: |
-          if [ -n "${{ secrets.KUBE_CONFIG_DATA }}" ]; then
+          if [ "${{ secrets.ENABLE_K8S_DEPLOY }}" = "true" ] && [ -n "${{ secrets.KUBE_CONFIG_DATA }}" ]; then
             echo "K8S_ENABLED=true" >> $GITHUB_ENV
+            echo "Kubernetes deploy is enabled for this run."
           else
             echo "K8S_ENABLED=false" >> $GITHUB_ENV
+            echo "Kubernetes deploy is disabled for this run."
           fi
 
       - name: Setup kubectl
@@ -484,7 +486,7 @@ jobs:
 
           echo "Validating SSH handshake/auth with provided key..."
           SSH_READY=false
-          for i in {1..8}; do
+          for i in {1..3}; do
             if ssh -i ec2_key.pem \
               -o StrictHostKeyChecking=no \
               -o UserKnownHostsFile=/dev/null \
@@ -495,7 +497,7 @@ jobs:
               echo "SSH authentication is working."
               break
             fi
-            echo "SSH handshake/auth not ready (attempt ${i}/8), retrying in 5s..."
+            echo "SSH handshake/auth not ready (attempt ${i}/3), retrying in 5s..."
             sleep 5
           done
 
