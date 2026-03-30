@@ -175,12 +175,10 @@ jobs:
 
       - name: Detect Kubernetes deploy config
         run: |
-          if [ "${{ secrets.ENABLE_K8S_DEPLOY }}" = "true" ] && [ -n "${{ secrets.KUBE_CONFIG_DATA }}" ]; then
+          if [ -n "${{ secrets.KUBE_CONFIG_DATA }}" ]; then
             echo "K8S_ENABLED=true" >> $GITHUB_ENV
-            echo "Kubernetes deploy is enabled for this run."
           else
             echo "K8S_ENABLED=false" >> $GITHUB_ENV
-            echo "Kubernetes deploy is disabled for this run."
           fi
 
       - name: Setup kubectl
@@ -190,179 +188,9 @@ jobs:
       - name: Configure kubeconfig
         if: env.K8S_ENABLED == 'true'
         run: |
-          set -euo pipefail
           mkdir -p "${HOME}/.kube"
-          KUBE_CONFIG_SECRET='${{ secrets.KUBE_CONFIG_DATA }}'
-          KUBE_CONFIG_NORMALIZED="$(printf '%s' "${KUBE_CONFIG_SECRET}" | tr -d '\r')"
-          KUBE_CONFIG_PATH="${HOME}/.kube/config"
-          KUBE_CONFIG_OK=false
-
-          # Format 1: raw kubeconfig YAML
-          printf '%s' "${KUBE_CONFIG_NORMALIZED}" > "${KUBE_CONFIG_PATH}"
-          if kubectl config view --kubeconfig "${KUBE_CONFIG_PATH}" >/dev/null 2>&1; then
-            echo "Loaded raw kubeconfig from KUBE_CONFIG_DATA."
-            KUBE_CONFIG_OK=true
-          fi
-
-          # Format 2: raw kubeconfig with escaped newlines (\n)
-          if [ "${KUBE_CONFIG_OK}" != "true" ]; then
-            printf '%b' "${KUBE_CONFIG_NORMALIZED}" > "${KUBE_CONFIG_PATH}"
-            if kubectl config view --kubeconfig "${KUBE_CONFIG_PATH}" >/dev/null 2>&1; then
-              echo "Loaded escaped-newline kubeconfig from KUBE_CONFIG_DATA."
-              KUBE_CONFIG_OK=true
-            fi
-          fi
-
-          # Format 3: base64-encoded kubeconfig
-          if [ "${KUBE_CONFIG_OK}" != "true" ]; then
-            if printf '%s' "${KUBE_CONFIG_NORMALIZED}" | base64 -d > "${KUBE_CONFIG_PATH}" 2>/dev/null && \
-               kubectl config view --kubeconfig "${KUBE_CONFIG_PATH}" >/dev/null 2>&1; then
-              echo "Loaded base64 kubeconfig from KUBE_CONFIG_DATA."
-              KUBE_CONFIG_OK=true
-            fi
-          fi
-
-          if [ "${KUBE_CONFIG_OK}" != "true" ]; then
-            echo "KUBE_CONFIG_DATA is not a valid kubeconfig in raw, escaped, or base64 format."
-            echo "Regenerate with: kubectl config view --raw --flatten --minify | base64 -w 0"
-            exit 1
-          fi
+          echo "${{ secrets.KUBE_CONFIG_DATA }}" | base64 -d > "${HOME}/.kube/config"
           chmod 600 "${HOME}/.kube/config"
-
-      - name: Open SSH tunnel for local kube API server
-        if: env.K8S_ENABLED == 'true'
-        env:
-          EC2_HOST: ${{ secrets.EC2_HOST }}
-          EC2_USER: ${{ secrets.EC2_USER }}
-          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
-        run: |
-          set -euo pipefail
-          KUBE_SERVER="$(kubectl config view --minify -o jsonpath='{.clusters[0].cluster.server}')"
-          echo "Kubernetes API server: ${KUBE_SERVER}"
-
-          if echo "${KUBE_SERVER}" | grep -Eq '127\.0\.0\.1|localhost'; then
-            if [ -z "${EC2_HOST}" ] || [ -z "${EC2_USER}" ] || [ -z "${EC2_SSH_KEY}" ]; then
-              echo "Kubeconfig points to local API server, but EC2 tunnel credentials are missing."
-              echo "Set EC2_HOST, EC2_USER, and EC2_SSH_KEY secrets."
-              exit 1
-            fi
-
-            TUNNEL_KEY="${RUNNER_TEMP}/k8s_tunnel_key.pem"
-            printf '%s\n' "${EC2_SSH_KEY}" | tr -d '\r' > "${TUNNEL_KEY}"
-            chmod 600 "${TUNNEL_KEY}"
-            SSH_BASE_OPTS="-i ${TUNNEL_KEY} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -o ConnectionAttempts=1 -o ServerAliveInterval=30 -o ServerAliveCountMax=3"
-
-            # Retry SSH handshake because some hosts intermittently reset port 22.
-            SSH_READY=false
-            for attempt in $(seq 1 8); do
-              if ssh ${SSH_BASE_OPTS} "${EC2_USER}@${EC2_HOST}" "echo ssh-ok" >/dev/null 2>&1; then
-                SSH_READY=true
-                break
-              fi
-              echo "SSH not ready (attempt ${attempt}/8), retrying in 5s..."
-              sleep 5
-            done
-            if [ "${SSH_READY}" != "true" ]; then
-              echo "::warning::Unable to establish SSH connection to ${EC2_USER}@${EC2_HOST}:22 after retries."
-              echo "::warning::Skipping Kubernetes deploy for this run. Verify EC2 is running and SSH is reachable from GitHub runners."
-              echo "K8S_ENABLED=false" >> $GITHUB_ENV
-              echo "K8S_TUNNELED=false" >> $GITHUB_ENV
-              exit 0
-            fi
-
-            # Refresh CI kubeconfig from EC2 so runner uses the cluster config that
-            # is actually valid on the target machine.
-            SSH_FETCH_OK=false
-            for attempt in $(seq 1 5); do
-              if ssh ${SSH_BASE_OPTS} "${EC2_USER}@${EC2_HOST}" \
-                "set -euo pipefail; \
-               TMP_KUBECONFIG=\$(mktemp); \
-               trap 'rm -f \"\${TMP_KUBECONFIG}\"' EXIT; \
-               if command -v kubectl >/dev/null 2>&1; then \
-                 kubectl config view --raw --flatten --minify > \"\${TMP_KUBECONFIG}\"; \
-               elif command -v microk8s >/dev/null 2>&1; then \
-                 sudo microk8s kubectl config view --raw --flatten --minify > \"\${TMP_KUBECONFIG}\"; \
-               elif [ -f ~/.kube/config ]; then \
-                 cat ~/.kube/config > \"\${TMP_KUBECONFIG}\"; \
-               else \
-                 echo 'No Kubernetes runtime detected on EC2. Bootstrapping k3s...' >&2; \
-                 curl -sfL https://get.k3s.io | sudo sh - >/dev/null 2>&1; \
-                 mkdir -p ~/.kube; \
-                 sudo cp /etc/rancher/k3s/k3s.yaml ~/.kube/config; \
-                 sudo chown \$(id -u):\$(id -g) ~/.kube/config; \
-                 for i in \$(seq 1 30); do \
-                   if sudo k3s kubectl get nodes >/dev/null 2>&1; then break; fi; \
-                   if [ \"\$i\" -eq 30 ]; then echo 'k3s API did not become ready in time.' >&2; exit 1; fi; \
-                   sleep 5; \
-                 done; \
-                 sudo k3s kubectl config view --raw --flatten --minify > \"\${TMP_KUBECONFIG}\"; \
-               fi; \
-               if ! grep -q '^apiVersion:' \"\${TMP_KUBECONFIG}\"; then \
-                 echo 'Fetched kubeconfig is invalid on EC2.' >&2; \
-                 exit 1; \
-               fi; \
-               cat \"\${TMP_KUBECONFIG}\"" > "${HOME}/.kube/config"; then
-                SSH_FETCH_OK=true
-                break
-              fi
-              echo "Failed to fetch kubeconfig over SSH (attempt ${attempt}/5), retrying in 5s..."
-              sleep 5
-            done
-            if [ "${SSH_FETCH_OK}" != "true" ]; then
-              echo "::warning::Failed to fetch kubeconfig from EC2 after retries."
-              echo "::warning::Skipping Kubernetes deploy for this run."
-              echo "K8S_ENABLED=false" >> $GITHUB_ENV
-              echo "K8S_TUNNELED=false" >> $GITHUB_ENV
-              exit 0
-            fi
-            chmod 600 "${HOME}/.kube/config"
-            kubectl config view --raw --flatten --minify --kubeconfig "${HOME}/.kube/config" > "${HOME}/.kube/config.flattened"
-            mv "${HOME}/.kube/config.flattened" "${HOME}/.kube/config"
-
-            REMOTE_KUBE_SERVER="$(kubectl config view --minify -o jsonpath='{.clusters[0].cluster.server}')"
-            KUBE_HOST="$(echo "${REMOTE_KUBE_SERVER}" | sed -E 's#https?://([^:/]+).*#\1#')"
-            KUBE_PORT="$(echo "${REMOTE_KUBE_SERVER}" | sed -nE 's#https?://[^:]+:([0-9]+).*#\1#p')"
-            if [ -z "${KUBE_PORT}" ]; then
-              KUBE_PORT=443
-            fi
-            if ! echo "${KUBE_PORT}" | grep -Eq '^[0-9]+$'; then
-              echo "Unable to parse Kubernetes API port from ${REMOTE_KUBE_SERVER}"
-              exit 1
-            fi
-
-            LOCAL_TUNNEL_PORT=51690
-            SSH_TUNNEL_OK=false
-            for attempt in $(seq 1 5); do
-              if ssh -f -N \
-                -L "${LOCAL_TUNNEL_PORT}:${KUBE_HOST}:${KUBE_PORT}" \
-                ${SSH_BASE_OPTS} \
-                -o ExitOnForwardFailure=yes \
-                "${EC2_USER}@${EC2_HOST}"; then
-                SSH_TUNNEL_OK=true
-                break
-              fi
-              echo "Failed to establish SSH tunnel (attempt ${attempt}/5), retrying in 5s..."
-              sleep 5
-            done
-            if [ "${SSH_TUNNEL_OK}" != "true" ]; then
-              echo "::warning::Unable to establish SSH tunnel to Kubernetes API after retries."
-              echo "::warning::Skipping Kubernetes deploy for this run."
-              echo "K8S_ENABLED=false" >> $GITHUB_ENV
-              echo "K8S_TUNNELED=false" >> $GITHUB_ENV
-              exit 0
-            fi
-
-            CLUSTER_NAME="$(kubectl config view --minify -o jsonpath='{.clusters[0].name}')"
-            kubectl config set-cluster "${CLUSTER_NAME}" --server="https://127.0.0.1:${LOCAL_TUNNEL_PORT}"
-            # Keep TLS verification against the original remote host to avoid
-            # certificate mismatch errors after tunneling to localhost.
-            kubectl config set-cluster "${CLUSTER_NAME}" --tls-server-name="${KUBE_HOST}"
-
-            echo "K8S_TUNNELED=true" >> $GITHUB_ENV
-            echo "K8S_TUNNEL_KEY=${TUNNEL_KEY}" >> $GITHUB_ENV
-          else
-            echo "K8S_TUNNELED=false" >> $GITHUB_ENV
-          fi
 
       - name: Validate kubeconfig for remote cluster
         if: env.K8S_ENABLED == 'true'
@@ -372,30 +200,17 @@ jobs:
           echo "Kubernetes API server: ${KUBE_SERVER}"
 
           if echo "${KUBE_SERVER}" | grep -Eq '127\.0\.0\.1|localhost'; then
-            if [ "${K8S_TUNNELED:-false}" != "true" ]; then
-              echo "KUBE_CONFIG_DATA points to a local cluster (${KUBE_SERVER}) and no SSH tunnel is active."
-              echo "Use a remote cluster kubeconfig or configure EC2 tunnel secrets."
-              exit 1
-            fi
-            echo "Using SSH tunnel for local kube API server endpoint ${KUBE_SERVER}."
+            echo "::warning::KUBE_CONFIG_DATA points to a local cluster (${KUBE_SERVER}). Skipping Kubernetes deploy on GitHub-hosted runner."
+            echo "K8S_ENABLED=false" >> $GITHUB_ENV
+            exit 0
           fi
 
           if grep -Eq 'client-certificate:|client-key:|certificate-authority:' "${HOME}/.kube/config"; then
-            echo "KUBE_CONFIG_DATA contains path-based cert references."
-            echo "Regenerate using: kubectl config view --raw --flatten --minify"
-            exit 1
+            echo "::warning::KUBE_CONFIG_DATA contains path-based cert references. Skipping Kubernetes deploy."
+            echo "::warning::Regenerate using: kubectl config view --raw --flatten --minify"
+            echo "K8S_ENABLED=false" >> $GITHUB_ENV
+            exit 0
           fi
-
-          for i in {1..5}; do
-            if kubectl version --request-timeout=20s; then
-              break
-            fi
-            if [ "$i" -eq 5 ]; then
-              echo "Unable to reach Kubernetes API after retries."
-              exit 1
-            fi
-            sleep 5
-          done
 
       - name: Resolve Kubernetes runtime URLs
         if: env.K8S_ENABLED == 'true'
@@ -445,10 +260,6 @@ jobs:
           kubectl -n notes-app rollout restart deployment/notes-app
           kubectl -n notes-app rollout status deployment/notes-app --timeout=240s
 
-      - name: Cleanup kube tunnel key
-        if: always() && env.K8S_TUNNEL_KEY != ''
-        run: rm -f "${K8S_TUNNEL_KEY}"
-
       - name: Setup Python for Ansible
         uses: actions/setup-python@v5
         with:
@@ -461,7 +272,7 @@ jobs:
 
       - name: Prepare SSH key
         run: |
-          printf '%s\n' "${{ secrets.EC2_SSH_KEY }}" | tr -d '\r' > ec2_key.pem
+          printf '%s\n' "${{ secrets.EC2_SSH_KEY }}" > ec2_key.pem
           chmod 600 ec2_key.pem
 
       - name: Preflight SSH connectivity
@@ -484,36 +295,13 @@ jobs:
             sleep 5
           done
 
-          echo "Validating SSH handshake/auth with provided key..."
-          SSH_READY=false
-          for i in {1..3}; do
-            if ssh -i ec2_key.pem \
-              -o StrictHostKeyChecking=no \
-              -o UserKnownHostsFile=/dev/null \
-              -o ConnectTimeout=10 \
-              -o ConnectionAttempts=1 \
-              "${USER}@${HOST}" "echo ssh-ok" >/dev/null 2>&1; then
-              SSH_READY=true
-              echo "SSH authentication is working."
-              break
-            fi
-            echo "SSH handshake/auth not ready (attempt ${i}/3), retrying in 5s..."
-            sleep 5
-          done
-
-          if [ "${SSH_READY}" != "true" ]; then
-            echo "::warning::SSH handshake/auth precheck failed for ${USER}@${HOST}."
-            echo "::warning::Proceeding to Ansible deploy attempts anyway."
-          fi
-
       - name: Deploy on EC2 with Ansible
         env:
           APP_KEY: ${{ secrets.APP_KEY }}
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
           ANSIBLE_CONFIG: ansible/ansible.cfg
-          ANSIBLE_TIMEOUT: "30"
           ANSIBLE_HOST_KEY_CHECKING: "False"
-          ANSIBLE_SSH_ARGS: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ControlMaster=auto -o ControlPersist=120s -o ServerAliveInterval=20 -o ServerAliveCountMax=6 -o ConnectTimeout=15 -o ConnectionAttempts=3 -o TCPKeepAlive=yes"
+          ANSIBLE_SSH_ARGS: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
         run: |
           set -e
           python - <<'PY'
@@ -531,28 +319,11 @@ jobs:
               json.dump(payload, f)
           PY
 
-          DEPLOY_OK=false
-          for attempt in 1 2 3; do
-            echo "Running ansible deploy attempt ${attempt}/3..."
-            if ansible-playbook \
-              -i "${{ secrets.EC2_HOST }}," \
-              -u "${{ secrets.EC2_USER }}" \
-              --private-key ec2_key.pem \
-              ansible/deploy.yml \
-              -e @deploy-vars.json; then
-              DEPLOY_OK=true
-              break
-            fi
-
-            if [ "${attempt}" -lt 3 ]; then
-              echo "Ansible deploy failed (attempt ${attempt}/3). Retrying in 15s..."
-              sleep 15
-            fi
-          done
-
-          if [ "${DEPLOY_OK}" != "true" ]; then
-            echo "Ansible deployment failed after retries."
-            exit 1
-          fi
+          ansible-playbook \
+            -i "${{ secrets.EC2_HOST }}," \
+            -u "${{ secrets.EC2_USER }}" \
+            --private-key ec2_key.pem \
+            ansible/deploy.yml \
+            -e @deploy-vars.json
 
           rm -f ec2_key.pem deploy-vars.json
