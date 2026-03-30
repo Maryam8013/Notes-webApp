@@ -460,6 +460,7 @@ jobs:
           set -euo pipefail
           HOST="${{ secrets.EC2_HOST }}"
           USER="${{ secrets.EC2_USER }}"
+          echo "DEPLOY_ENABLED=true" >> $GITHUB_ENV
           echo "Checking SSH reachability for ${USER}@${HOST}:22"
 
           for i in {1..30}; do
@@ -475,11 +476,37 @@ jobs:
             sleep 5
           done
 
+          echo "Validating SSH handshake/auth with provided key..."
+          SSH_READY=false
+          for i in {1..8}; do
+            if ssh -i ec2_key.pem \
+              -o StrictHostKeyChecking=no \
+              -o UserKnownHostsFile=/dev/null \
+              -o ConnectTimeout=10 \
+              -o ConnectionAttempts=1 \
+              "${USER}@${HOST}" "echo ssh-ok" >/dev/null 2>&1; then
+              SSH_READY=true
+              echo "SSH authentication is working."
+              break
+            fi
+            echo "SSH handshake/auth not ready (attempt ${i}/8), retrying in 5s..."
+            sleep 5
+          done
+
+          if [ "${SSH_READY}" != "true" ]; then
+            echo "::warning::SSH handshake/auth failed for ${USER}@${HOST}. Skipping Ansible deploy for this run."
+            echo "::warning::Check EC2 security group/NACL, key pair match, and EC2_HOST/EC2_USER secrets."
+            echo "DEPLOY_ENABLED=false" >> $GITHUB_ENV
+            exit 0
+          fi
+
       - name: Deploy on EC2 with Ansible
+        if: env.DEPLOY_ENABLED != 'false'
         env:
           APP_KEY: ${{ secrets.APP_KEY }}
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
           ANSIBLE_CONFIG: ansible/ansible.cfg
+          ANSIBLE_TIMEOUT: "30"
           ANSIBLE_HOST_KEY_CHECKING: "False"
           ANSIBLE_SSH_ARGS: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
         run: |
