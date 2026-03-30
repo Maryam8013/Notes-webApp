@@ -188,16 +188,41 @@ jobs:
       - name: Configure kubeconfig
         if: env.K8S_ENABLED == 'true'
         run: |
+          set -euo pipefail
           mkdir -p "${HOME}/.kube"
           KUBE_CONFIG_SECRET='${{ secrets.KUBE_CONFIG_DATA }}'
-          if printf '%s' "${KUBE_CONFIG_SECRET}" | tr -d '\r' | base64 -d > "${HOME}/.kube/config" 2>/dev/null; then
-            echo "Loaded base64 kubeconfig from KUBE_CONFIG_DATA."
-          else
-            printf '%s' "${KUBE_CONFIG_SECRET}" > "${HOME}/.kube/config"
-            echo "KUBE_CONFIG_DATA is not base64; using it as raw kubeconfig."
+          KUBE_CONFIG_NORMALIZED="$(printf '%s' "${KUBE_CONFIG_SECRET}" | tr -d '\r')"
+          KUBE_CONFIG_PATH="${HOME}/.kube/config"
+          KUBE_CONFIG_OK=false
+
+          # Format 1: raw kubeconfig YAML
+          printf '%s' "${KUBE_CONFIG_NORMALIZED}" > "${KUBE_CONFIG_PATH}"
+          if kubectl config view --kubeconfig "${KUBE_CONFIG_PATH}" >/dev/null 2>&1; then
+            echo "Loaded raw kubeconfig from KUBE_CONFIG_DATA."
+            KUBE_CONFIG_OK=true
           fi
-          if ! grep -q '^apiVersion:' "${HOME}/.kube/config"; then
-            echo "KUBE_CONFIG_DATA did not produce a valid kubeconfig."
+
+          # Format 2: raw kubeconfig with escaped newlines (\n)
+          if [ "${KUBE_CONFIG_OK}" != "true" ]; then
+            printf '%b' "${KUBE_CONFIG_NORMALIZED}" > "${KUBE_CONFIG_PATH}"
+            if kubectl config view --kubeconfig "${KUBE_CONFIG_PATH}" >/dev/null 2>&1; then
+              echo "Loaded escaped-newline kubeconfig from KUBE_CONFIG_DATA."
+              KUBE_CONFIG_OK=true
+            fi
+          fi
+
+          # Format 3: base64-encoded kubeconfig
+          if [ "${KUBE_CONFIG_OK}" != "true" ]; then
+            if printf '%s' "${KUBE_CONFIG_NORMALIZED}" | base64 -d > "${KUBE_CONFIG_PATH}" 2>/dev/null && \
+               kubectl config view --kubeconfig "${KUBE_CONFIG_PATH}" >/dev/null 2>&1; then
+              echo "Loaded base64 kubeconfig from KUBE_CONFIG_DATA."
+              KUBE_CONFIG_OK=true
+            fi
+          fi
+
+          if [ "${KUBE_CONFIG_OK}" != "true" ]; then
+            echo "KUBE_CONFIG_DATA is not a valid kubeconfig in raw, escaped, or base64 format."
+            echo "Regenerate with: kubectl config view --raw --flatten --minify | base64 -w 0"
             exit 1
           fi
           chmod 600 "${HOME}/.kube/config"
