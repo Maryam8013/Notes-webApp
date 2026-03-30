@@ -21,7 +21,7 @@
       ansible.builtin.wait_for_connection:
         delay: 5
         sleep: 5
-        timeout: 90
+        timeout: 420
 
   tasks:
     - name: Validate required deployment vars
@@ -40,15 +40,6 @@
         path: "{{ deploy_dir }}"
         state: directory
         mode: "0755"
-
-    - name: Refresh SSH connection before template copy
-      ansible.builtin.meta: reset_connection
-
-    - name: Re-verify Ansible SSH connection
-      ansible.builtin.wait_for_connection:
-        delay: 2
-        sleep: 3
-        timeout: 60
 
     - name: Render docker-compose.yml
       ansible.builtin.template:
