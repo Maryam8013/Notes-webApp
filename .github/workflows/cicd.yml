@@ -272,7 +272,7 @@ jobs:
 
       - name: Prepare SSH key
         run: |
-          printf '%s\n' "${{ secrets.EC2_SSH_KEY }}" > ec2_key.pem
+          printf '%s\n' "${{ secrets.EC2_SSH_KEY }}" | tr -d '\r' > ec2_key.pem
           chmod 600 ec2_key.pem
 
       - name: Preflight SSH connectivity
@@ -300,8 +300,9 @@ jobs:
           APP_KEY: ${{ secrets.APP_KEY }}
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
           ANSIBLE_CONFIG: ansible/ansible.cfg
+          ANSIBLE_TIMEOUT: "60"
           ANSIBLE_HOST_KEY_CHECKING: "False"
-          ANSIBLE_SSH_ARGS: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          ANSIBLE_SSH_ARGS: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ControlMaster=auto -o ControlPersist=120s -o ServerAliveInterval=20 -o ServerAliveCountMax=6 -o ConnectTimeout=30 -o ConnectionAttempts=10 -o TCPKeepAlive=yes -o PreferredAuthentications=publickey -o IdentitiesOnly=yes"
         run: |
           set -e
           python - <<'PY'
@@ -319,11 +320,26 @@ jobs:
               json.dump(payload, f)
           PY
 
-          ansible-playbook \
-            -i "${{ secrets.EC2_HOST }}," \
-            -u "${{ secrets.EC2_USER }}" \
-            --private-key ec2_key.pem \
-            ansible/deploy.yml \
-            -e @deploy-vars.json
+          DEPLOY_OK=false
+          for attempt in 1 2 3; do
+            echo "Running ansible deploy attempt ${attempt}/3..."
+            if ansible-playbook \
+              -i "${{ secrets.EC2_HOST }}," \
+              -u "${{ secrets.EC2_USER }}" \
+              --private-key ec2_key.pem \
+              ansible/deploy.yml \
+              -e @deploy-vars.json; then
+              DEPLOY_OK=true
+              break
+            fi
+            if [ "${attempt}" -lt 3 ]; then
+              echo "Ansible deploy failed (attempt ${attempt}/3). Retrying in 30s..."
+              sleep 30
+            fi
+          done
+          if [ "${DEPLOY_OK}" != "true" ]; then
+            echo "Ansible deployment failed after retries."
+            exit 1
+          fi
 
           rm -f ec2_key.pem deploy-vars.json

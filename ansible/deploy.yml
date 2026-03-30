@@ -21,7 +21,7 @@
       ansible.builtin.wait_for_connection:
         delay: 5
         sleep: 5
-        timeout: 420
+        timeout: 600
 
   tasks:
     - name: Validate required deployment vars
