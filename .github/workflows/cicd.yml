@@ -261,9 +261,11 @@ jobs:
               sleep 5
             done
             if [ "${SSH_READY}" != "true" ]; then
-              echo "Unable to establish SSH connection to ${EC2_USER}@${EC2_HOST}:22 after retries."
-              echo "Verify EC2 is running, security group allows SSH from GitHub runners, and host key is correct."
-              exit 1
+              echo "::warning::Unable to establish SSH connection to ${EC2_USER}@${EC2_HOST}:22 after retries."
+              echo "::warning::Skipping Kubernetes deploy for this run. Verify EC2 is running and SSH is reachable from GitHub runners."
+              echo "K8S_ENABLED=false" >> $GITHUB_ENV
+              echo "K8S_TUNNELED=false" >> $GITHUB_ENV
+              exit 0
             fi
 
             # Refresh CI kubeconfig from EC2 so runner uses the cluster config that
@@ -298,8 +300,11 @@ jobs:
               sleep 5
             done
             if [ "${SSH_FETCH_OK}" != "true" ]; then
-              echo "Failed to fetch kubeconfig from EC2 after retries."
-              exit 1
+              echo "::warning::Failed to fetch kubeconfig from EC2 after retries."
+              echo "::warning::Skipping Kubernetes deploy for this run."
+              echo "K8S_ENABLED=false" >> $GITHUB_ENV
+              echo "K8S_TUNNELED=false" >> $GITHUB_ENV
+              exit 0
             fi
             chmod 600 "${HOME}/.kube/config"
             kubectl config view --raw --flatten --minify --kubeconfig "${HOME}/.kube/config" > "${HOME}/.kube/config.flattened"
@@ -331,8 +336,11 @@ jobs:
               sleep 5
             done
             if [ "${SSH_TUNNEL_OK}" != "true" ]; then
-              echo "Unable to establish SSH tunnel to Kubernetes API after retries."
-              exit 1
+              echo "::warning::Unable to establish SSH tunnel to Kubernetes API after retries."
+              echo "::warning::Skipping Kubernetes deploy for this run."
+              echo "K8S_ENABLED=false" >> $GITHUB_ENV
+              echo "K8S_TUNNELED=false" >> $GITHUB_ENV
+              exit 0
             fi
 
             CLUSTER_NAME="$(kubectl config view --minify -o jsonpath='{.clusters[0].name}')"
