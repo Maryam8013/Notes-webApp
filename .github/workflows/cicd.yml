@@ -189,7 +189,17 @@ jobs:
         if: env.K8S_ENABLED == 'true'
         run: |
           mkdir -p "${HOME}/.kube"
-          echo "${{ secrets.KUBE_CONFIG_DATA }}" | base64 -d > "${HOME}/.kube/config"
+          KUBE_CONFIG_SECRET='${{ secrets.KUBE_CONFIG_DATA }}'
+          if printf '%s' "${KUBE_CONFIG_SECRET}" | tr -d '\r' | base64 -d > "${HOME}/.kube/config" 2>/dev/null; then
+            echo "Loaded base64 kubeconfig from KUBE_CONFIG_DATA."
+          else
+            printf '%s' "${KUBE_CONFIG_SECRET}" > "${HOME}/.kube/config"
+            echo "KUBE_CONFIG_DATA is not base64; using it as raw kubeconfig."
+          fi
+          if ! grep -q '^apiVersion:' "${HOME}/.kube/config"; then
+            echo "KUBE_CONFIG_DATA did not produce a valid kubeconfig."
+            exit 1
+          fi
           chmod 600 "${HOME}/.kube/config"
 
       - name: Open SSH tunnel for local kube API server
@@ -211,7 +221,7 @@ jobs:
             fi
 
             TUNNEL_KEY="${RUNNER_TEMP}/k8s_tunnel_key.pem"
-            printf '%s\n' "${EC2_SSH_KEY}" > "${TUNNEL_KEY}"
+            printf '%s\n' "${EC2_SSH_KEY}" | tr -d '\r' > "${TUNNEL_KEY}"
             chmod 600 "${TUNNEL_KEY}"
             SSH_BASE_OPTS="-i ${TUNNEL_KEY} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -o ConnectionAttempts=1 -o ServerAliveInterval=30 -o ServerAliveCountMax=3"
 
@@ -302,6 +312,9 @@ jobs:
 
             CLUSTER_NAME="$(kubectl config view --minify -o jsonpath='{.clusters[0].name}')"
             kubectl config set-cluster "${CLUSTER_NAME}" --server="https://127.0.0.1:${LOCAL_TUNNEL_PORT}"
+            # Keep TLS verification against the original remote host to avoid
+            # certificate mismatch errors after tunneling to localhost.
+            kubectl config set-cluster "${CLUSTER_NAME}" --tls-server-name="${KUBE_HOST}"
 
             echo "K8S_TUNNELED=true" >> $GITHUB_ENV
             echo "K8S_TUNNEL_KEY=${TUNNEL_KEY}" >> $GITHUB_ENV
@@ -406,7 +419,7 @@ jobs:
 
       - name: Prepare SSH key
         run: |
-          printf '%s\n' "${{ secrets.EC2_SSH_KEY }}" > ec2_key.pem
+          printf '%s\n' "${{ secrets.EC2_SSH_KEY }}" | tr -d '\r' > ec2_key.pem
           chmod 600 ec2_key.pem
 
       - name: Preflight SSH connectivity
