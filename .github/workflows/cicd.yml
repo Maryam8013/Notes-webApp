@@ -515,7 +515,7 @@ jobs:
           ANSIBLE_CONFIG: ansible/ansible.cfg
           ANSIBLE_TIMEOUT: "30"
           ANSIBLE_HOST_KEY_CHECKING: "False"
-          ANSIBLE_SSH_ARGS: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          ANSIBLE_SSH_ARGS: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ControlMaster=auto -o ControlPersist=120s -o ServerAliveInterval=20 -o ServerAliveCountMax=6 -o ConnectTimeout=15 -o ConnectionAttempts=3 -o TCPKeepAlive=yes"
         run: |
           set -e
           python - <<'PY'
