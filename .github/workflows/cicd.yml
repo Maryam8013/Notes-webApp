@@ -274,16 +274,18 @@ jobs:
             for attempt in $(seq 1 5); do
               if ssh ${SSH_BASE_OPTS} "${EC2_USER}@${EC2_HOST}" \
                 "set -euo pipefail; \
+               TMP_KUBECONFIG=\$(mktemp); \
+               trap 'rm -f \"\${TMP_KUBECONFIG}\"' EXIT; \
                if command -v kubectl >/dev/null 2>&1; then \
-                 kubectl config view --raw --flatten --minify; \
+                 kubectl config view --raw --flatten --minify > \"\${TMP_KUBECONFIG}\"; \
                elif command -v microk8s >/dev/null 2>&1; then \
-                 sudo microk8s kubectl config view --raw --flatten --minify; \
+                 sudo microk8s kubectl config view --raw --flatten --minify > \"\${TMP_KUBECONFIG}\"; \
                elif [ -f ~/.kube/config ]; then \
-                 cat ~/.kube/config; \
+                 cat ~/.kube/config > \"\${TMP_KUBECONFIG}\"; \
                else \
                  echo 'No Kubernetes runtime detected on EC2. Bootstrapping k3s...' >&2; \
-                 curl -sfL https://get.k3s.io | sh -; \
-                 sudo mkdir -p ~/.kube; \
+                 curl -sfL https://get.k3s.io | sudo sh - >/dev/null 2>&1; \
+                 mkdir -p ~/.kube; \
                  sudo cp /etc/rancher/k3s/k3s.yaml ~/.kube/config; \
                  sudo chown \$(id -u):\$(id -g) ~/.kube/config; \
                  for i in \$(seq 1 30); do \
@@ -291,8 +293,13 @@ jobs:
                    if [ \"\$i\" -eq 30 ]; then echo 'k3s API did not become ready in time.' >&2; exit 1; fi; \
                    sleep 5; \
                  done; \
-                 sudo k3s kubectl config view --raw --flatten --minify; \
-               fi" > "${HOME}/.kube/config"; then
+                 sudo k3s kubectl config view --raw --flatten --minify > \"\${TMP_KUBECONFIG}\"; \
+               fi; \
+               if ! grep -q '^apiVersion:' \"\${TMP_KUBECONFIG}\"; then \
+                 echo 'Fetched kubeconfig is invalid on EC2.' >&2; \
+                 exit 1; \
+               fi; \
+               cat \"\${TMP_KUBECONFIG}\"" > "${HOME}/.kube/config"; then
                 SSH_FETCH_OK=true
                 break
               fi
