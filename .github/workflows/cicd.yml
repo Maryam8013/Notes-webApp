@@ -467,7 +467,6 @@ jobs:
           set -euo pipefail
           HOST="${{ secrets.EC2_HOST }}"
           USER="${{ secrets.EC2_USER }}"
-          echo "DEPLOY_ENABLED=true" >> $GITHUB_ENV
           echo "Checking SSH reachability for ${USER}@${HOST}:22"
 
           for i in {1..30}; do
@@ -501,14 +500,11 @@ jobs:
           done
 
           if [ "${SSH_READY}" != "true" ]; then
-            echo "::warning::SSH handshake/auth failed for ${USER}@${HOST}. Skipping Ansible deploy for this run."
-            echo "::warning::Check EC2 security group/NACL, key pair match, and EC2_HOST/EC2_USER secrets."
-            echo "DEPLOY_ENABLED=false" >> $GITHUB_ENV
-            exit 0
+            echo "::warning::SSH handshake/auth precheck failed for ${USER}@${HOST}."
+            echo "::warning::Proceeding to Ansible deploy attempts anyway."
           fi
 
       - name: Deploy on EC2 with Ansible
-        if: env.DEPLOY_ENABLED != 'false'
         env:
           APP_KEY: ${{ secrets.APP_KEY }}
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
